@@ -3,7 +3,7 @@
 const {
     getUserData,
     getTelegramIdByAnonLinkCode,
-    getAnonLinkMap,
+    getAnonLinkMap, // Оставлено, если вдруг где-то используется напрямую, но в этой логике не нужно
     updateUserData,
 } = require('./dataAccess');
 
@@ -16,14 +16,18 @@ const MAX_MESSAGE_LENGTH = 500;
 
 async function handleStart(telegramId, startPayload, botUsername) {
     const telegramIdStr = String(telegramId);
+    console.log(`[HANDLER.handleStart] Получено /start от ${telegramIdStr}, Payload: ${startPayload || 'нет'}`);
 
     if (startPayload) {
         const ownerTelegramId = await getTelegramIdByAnonLinkCode(startPayload);
+        console.log(`[HANDLER.handleStart] ownerTelegramId для payload ${startPayload}: ${ownerTelegramId}`);
 
         if (ownerTelegramId && ownerTelegramId !== telegramIdStr) {
             let senderData = await getUserData(telegramIdStr);
             if (!senderData) {
+                console.log(`[HANDLER.handleStart] Отправитель ${telegramIdStr} не зарегистрирован, регистрируем.`);
                 senderData = await registerUser(telegramIdStr);
+                console.log(`[HANDLER.handleStart] Данные отправителя после регистрации:`, senderData);
             }
             senderData.currentCommandStep = 'awaiting_anon_message';
             senderData.tempData = { owner_telegram_id: ownerTelegramId };
@@ -34,15 +38,20 @@ async function handleStart(telegramId, startPayload, botUsername) {
                    `Отправить можно фото, видео, 💬 текст, 🔊 голосовые, 📷 видеосообщения (кружки), а также ✨ стикеры`;
         } else if (ownerTelegramId === telegramIdStr) {
             const userData = await getUserData(telegramIdStr);
+            console.log(`[HANDLER.handleStart] Пользователь ${telegramIdStr} перешел по своей ссылке. Данные:`, userData);
             return `Привет! Это ваша собственная анонимная ссылка. Вы не можете отправить анонимное сообщение самому себе.\n\n` +
                    `Ваша ссылка для анонимных вопросов: \`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``;
         } else {
+            console.log(`[HANDLER.handleStart] Ссылка с payload ${startPayload} недействительна.`);
             return `❌ Ссылка недействительна или больше не активна.`;
         }
     }
 
+    console.log(`[HANDLER.handleStart] Обычный /start от ${telegramIdStr}. Регистрируем/получаем пользователя.`);
     const userData = await registerUser(telegramIdStr);
+    console.log(`[HANDLER.handleStart] Данные пользователя после регистрации/получения:`, userData);
     const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``;
+    console.log(`[HANDLER.handleStart] Формируемая ссылка: ${formattedAnonLink}`);
 
     return (
         `🚀 Начни получать анонимные сообщения прямо сейчас!\n\n` +
@@ -53,11 +62,15 @@ async function handleStart(telegramId, startPayload, botUsername) {
 }
 
 async function handleMyLink(telegramId, botUsername) {
+    console.log(`[HANDLER.handleMyLink] Получено /mylink от ${telegramId}.`);
     const userData = await getUserData(telegramId);
     if (!userData) {
+        console.log(`[HANDLER.handleMyLink] Пользователь ${telegramId} не найден.`);
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
+    console.log(`[HANDLER.handleMyLink] Данные пользователя для /mylink:`, userData);
     const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``;
+    console.log(`[HANDLER.handleMyLink] Формируемая ссылка для /mylink: ${formattedAnonLink}`);
     return `Ваша личная ссылка для анонимных вопросов: ${formattedAnonLink}`;
 }
 
