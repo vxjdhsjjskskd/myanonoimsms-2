@@ -1,54 +1,45 @@
-// src/utils.js - Модуль для вспомогательных функций бота (обновленный для MongoDB)
+// src/utils.js - Модуль для вспомогательных функций бота (обновленный для MongoDB - Упрощенная)
 
 const { User } = require('./models'); // Импортируем модель User для проверки уникальности
 
 // --- Константы ---
-const ANONYMOUS_ID_LENGTH = 6;
 const ANONYMOUS_LINK_CODE_LENGTH = 8; // Длина кода для анонимной ссылки
 const AUTO_BLOCK_KEYWORDS = ["мат", "спам", "ругательство", "непристойность"];
 const AUTO_BLOCK_DURATION_HOURS = 24;
 
 /**
- * Генерирует уникальный 6-символьный анонимный ID, проверяя его уникальность в БД.
- * @returns {Promise<string>} Уникальный анонимный ID.
- */
-async function generateAnonymousId() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let newId;
-    let isUnique = false;
-    do {
-        newId = '';
-        for (let i = 0; i < ANONYMOUS_ID_LENGTH; i++) {
-            newId += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        // Проверяем уникальность в базе данных
-        const existingUser = await User.findOne({ anonymousId: newId });
-        if (!existingUser) {
-            isUnique = true;
-        }
-    } while (!isUnique);
-    return newId;
-}
-
-/**
  * Генерирует уникальный 8-символьный код для анонимной ссылки, проверяя его уникальность в БД.
- * @returns {Promise<string>} Уникальный код ссылки.
+ * @returns {Promise<string|null>} Уникальный код ссылки или null, если не удалось сгенерировать.
  */
-async function generateLinkCode() { // Имя изменено с generateUniqueLinkCode на generateLinkCode
+async function generateLinkCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let newCode;
     let isUnique = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 1000; // Увеличиваем количество попыток
+
+    console.log(`[Utils.generateLinkCode] Начинаем генерацию уникального кода ссылки.`);
     do {
         newCode = '';
         for (let i = 0; i < ANONYMOUS_LINK_CODE_LENGTH; i++) {
             newCode += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         // Проверяем уникальность в базе данных
+        console.log(`[Utils.generateLinkCode] Попытка ${attempts + 1}: Проверяем код ${newCode}`);
         const existingUser = await User.findOne({ anonLinkCode: newCode });
         if (!existingUser) {
             isUnique = true;
+            console.log(`[Utils.generateLinkCode] Код ${newCode} уникален.`);
+        } else {
+            console.log(`[Utils.generateLinkCode] Код ${newCode} уже существует.`);
+        }
+        attempts++;
+        if (attempts >= MAX_ATTEMPTS) {
+            console.error(`[Utils.generateLinkCode] ОШИБКА: Не удалось сгенерировать уникальный код после ${MAX_ATTEMPTS} попыток.`);
+            return null; // Возвращаем null, если не удалось сгенерировать
         }
     } while (!isUnique);
+    console.log(`[Utils.generateLinkCode] Сгенерирован уникальный код: ${newCode} за ${attempts} попыток.`);
     return newCode;
 }
 
@@ -77,8 +68,7 @@ function checkAutoBlock(messageText) {
 
 // Экспортируем все вспомогательные функции и константы
 module.exports = {
-    generateAnonymousId,
-    generateLinkCode, // Имя изменено
+    generateLinkCode,
     getTodayDateString,
     checkAutoBlock,
     AUTO_BLOCK_DURATION_HOURS
