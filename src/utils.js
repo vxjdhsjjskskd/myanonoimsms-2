@@ -24,9 +24,14 @@ async function generateLinkCode() {
         for (let i = 0; i < ANONYMOUS_LINK_CODE_LENGTH; i++) {
             newCode += chars.charAt(Math.floor(Math.random() * chars.length));
         }
-        // Проверяем уникальность в базе данных
+        // Проверяем уникальность в базе данных по обоим полям (anonLinkCode и linkCode)
         console.log(`[Utils.generateLinkCode] Попытка ${attempts + 1}: Проверяем код ${newCode}`);
-        const existingUser = await User.findOne({ anonLinkCode: newCode });
+        const existingUser = await User.findOne({
+            $or: [
+                { anonLinkCode: newCode },
+                { linkCode: newCode }
+            ]
+        });
         if (!existingUser) {
             isUnique = true;
             console.log(`[Utils.generateLinkCode] Код ${newCode} уникален.`);
