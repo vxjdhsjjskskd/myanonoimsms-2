@@ -10,8 +10,8 @@ const {
     getUserData,
     updateUserData,
     getAnonLinkMap,
-    setAnonLinkMapEntry, // Эти функции будут адаптированы
-    deleteAnonLinkMapEntry, // Эти функции будут адаптированы
+    // setAnonLinkMapEntry, // <--- УДАЛИТЬ: не используется напрямую
+    // deleteAnonLinkMapEntry, // <--- УДАЛИТЬ: не используется напрямую
     getAllUsers // Эта функция будет адаптирована
 } = require('./src/dataAccess'); // <--- ИЗМЕНЕНО: database -> dataAccess
 
@@ -19,7 +19,7 @@ const { generateAnonymousId, generateLinkCode } = require('./src/utils'); // gen
 
 // Конфигурация
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const PORT = process.env.PORT || 5000; // Используем 5000 для Render/Replit
+const PORT = process.env.PORT || 10000; // Используем 10000 как запасной, если Render не предоставит свой
 
 if (!TOKEN) {
     console.error('❌ Ошибка: TELEGRAM_BOT_TOKEN не найден в переменных окружения');
@@ -98,7 +98,11 @@ async function initializeBotLogic() {
                         blockedUsers: [],
                         registeredAt: new Date(), // Используем Date объект
                         messagesReceived: 0,
-                        messagesSent: 0
+                        messagesSent: 0,
+                        waitingFor: null, // Добавляем эти поля при создании
+                        targetOwner: null,
+                        lastAnonSender: null,
+                        lastAnonSenderChatId: null
                     };
                     await updateUserData(chatId, userData); // <-- Асинхронно
                 }
@@ -148,7 +152,11 @@ async function initializeBotLogic() {
                 blockedUsers: [],
                 registeredAt: new Date(), // Используем Date объект
                 messagesReceived: 0,
-                messagesSent: 0
+                messagesSent: 0,
+                waitingFor: null, // Добавляем эти поля при создании
+                targetOwner: null,
+                lastAnonSender: null,
+                lastAnonSenderChatId: null
             };
             await updateUserData(chatId, userData); // <-- Асинхронно
             console.log(`✅ Новый пользователь: ${chatId}`);
@@ -234,9 +242,13 @@ async function initializeBotLogic() {
                 break;
 
             case 'send_more':
-                if (userData.lastTargetOwner) {
+                // lastTargetOwner не сохраняется в БД, поэтому его нужно получить из userData.targetOwner, если оно установлено
+                // или из lastAnonSenderChatId, если это был ответ
+                let targetOwnerForSendMore = userData.targetOwner || userData.lastAnonSenderChatId;
+
+                if (targetOwnerForSendMore) {
                     userData.waitingFor = 'anon_message';
-                    userData.targetOwner = userData.lastTargetOwner;
+                    userData.targetOwner = targetOwnerForSendMore; // Устанавливаем обратно
                     await updateUserData(chatId, userData); // <-- Асинхронно
 
                     const keyboard = {
@@ -253,6 +265,8 @@ async function initializeBotLogic() {
                         `Отправить можно фото, видео, 💬 текст, 🔊 голосовые, 📷 видеосообщения (кружки), а также ✨ стикеры`,
                         keyboard
                     );
+                } else {
+                    bot.sendMessage(chatId, 'Не удалось определить, кому отправить ещё сообщение. Пожалуйста, начните новую отправку.');
                 }
                 break;
 
@@ -262,18 +276,20 @@ async function initializeBotLogic() {
                         userData.blockedUsers.push(userData.lastAnonSender);
                         await updateUserData(chatId, userData); // <-- Асинхронно
                     }
+                    // Обновляем клавиатуру, чтобы показать "Очистить черный список"
+                    const newKeyboard = {
+                        inline_keyboard: [
+                            [{ text: '🗑️ Очистить черный список', callback_data: 'clear_blacklist' }]
+                        ]
+                    };
                     bot.editMessageReplyMarkup(
-                        {
-                            inline_keyboard: [
-                                [{ text: '🗑️ Очистить черный список', callback_data: 'clear_blacklist' }]
-                            ]
-                        },
+                        newKeyboard,
                         {
                             chat_id: chatId,
                             message_id: message.message_id
                         }
                     );
-                    bot.sendMessage(chatId, '🚫 Отправитель заблокирован');
+                    bot.sendMessage(chatId, `🚫 Отправитель ${userData.lastAnonSender} заблокирован.`);
                 }
                 break;
 
@@ -281,13 +297,13 @@ async function initializeBotLogic() {
                 userData.blockedUsers = [];
                 await updateUserData(chatId, userData); // <-- Асинхронно
                 bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] },
+                    { inline_keyboard: [] }, // Удаляем инлайн-клавиатуру
                     {
                         chat_id: chatId,
                         message_id: message.message_id
                     }
                 );
-                bot.sendMessage(chatId, '✅ Черный список очищен');
+                bot.sendMessage(chatId, '✅ Черный список очищен.');
                 break;
         }
     });
@@ -297,13 +313,15 @@ async function initializeBotLogic() {
         const chatId = msg.chat.id;
 
         // Игнорируем команды
-        if (msg.text && (msg.text.startsWith('/start') || msg.text === '/stats' || msg.text === '/changelink')) {
+        if (msg.text && (msg.text.startsWith('/') || msg.text === '')) { // Добавлена проверка на пустой текст
             return;
         }
 
         const userData = await getUserData(chatId); // <-- Асинхронно
         if (!userData) {
-            return bot.sendMessage(chatId, 'Сначала используйте команду /start');
+            // Если пользователь еще не зарегистрирован, но пытается что-то отправить,
+            // можно предложить ему /start
+            return bot.sendMessage(chatId, 'Сначала используйте команду /start для регистрации.');
         }
 
         // Обработка анонимного сообщения
@@ -314,9 +332,12 @@ async function initializeBotLogic() {
         // Обработка ответа на анонимное сообщение (reply)
         // Проверяем, что это ответ на сообщение бота (reply_to_message)
         // И что у нас есть информация о последнем анонимном отправителе
-        if (msg.reply_to_message && userData.lastAnonSenderChatId) { // ИЗМЕНЕНО: lastAnonSender -> lastAnonSenderChatId
+        if (msg.reply_to_message && userData.lastAnonSenderChatId) {
             return handleReplyMessage(chatId, msg, userData);
         }
+
+        // Если это не команда, не часть пошагового процесса и не ответ
+        bot.sendMessage(chatId, 'Я понимаю только команды. Используйте /start или команды из меню.');
     });
 
     // Функция обработки анонимного сообщения
@@ -332,7 +353,6 @@ async function initializeBotLogic() {
         }
 
         // Проверка блокировки
-        // isBlocked теперь асинхронна и принимает ownerData и senderAnonId
         if (ownerData.blockedUsers.includes(userData.anonymousId)) { // Используем blockedUsers из ownerData
             userData.waitingFor = null;
             userData.targetOwner = null;
@@ -347,7 +367,7 @@ async function initializeBotLogic() {
         await updateUserData(ownerChatId, ownerData); // <-- Асинхронно
 
         // Сохраняем для отправителя возможность написать еще
-        userData.lastTargetOwner = ownerChatId; // Сохраняем chat ID владельца для send_more
+        // userData.lastTargetOwner = ownerChatId; // Это поле не используется в схеме User
         userData.messagesSent = (userData.messagesSent || 0) + 1;
         userData.waitingFor = null;
         userData.targetOwner = null;
@@ -441,39 +461,4 @@ async function initializeBotLogic() {
             } else if (msg.voice) {
                 await bot.sendVoice(recipientChatId, msg.voice.file_id);
             } else if (msg.video_note) {
-                await bot.sendVideoNote(recipientChatId, msg.video_note.file_id);
-            } else if (msg.sticker) {
-                await bot.sendSticker(recipientChatId, msg.sticker.file_id);
-            }
-
-            // Кнопка "Написать ещё"
-            const keyboard = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '📝 Написать ещё', callback_data: 'send_more' }]
-                    ]
-                }
-            };
-
-            await bot.sendMessage(recipientChatId, '💌 Получен ответ!', keyboard);
-
-            // Подтверждение отправителю
-            bot.sendMessage(chatId, '✅ Ответ отправлен!');
-
-        } catch (error) {
-            console.error('Ошибка отправки ответа:', error);
-            bot.sendMessage(chatId, '❌ Ошибка отправки ответа');
-        }
-    }
-}
-
-// Обработка ошибок
-bot.on('polling_error', (error) => {
-    console.error('❌ Ошибка polling:', error.message);
-});
-
-bot.on('error', (error) => {
-    console.error('❌ Ошибка бота:', error.message);
-});
-
-console.log('🚀 Бот запускается...');
+                a
