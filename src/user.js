@@ -1,81 +1,87 @@
-// src/user.js - Функции для работы с пользователями (обновленный для AnonAskBot)
+// src/user.js - Функции для работы с пользователями (обновленный для AnonAskBot и MongoDB)
 
-const { getUsers, updateUserData, setAnonIdMapEntry, deleteAnonIdMapEntry, getAnonIdMap, setAnonLinkMapEntry, deleteAnonLinkMapEntry, getAnonLinkMap } = require('./inMemoryDb');
-const { generateAnonymousId, getTodayDateString, generateUniqueLinkCode } = require('./utils'); // Добавлена generateUniqueLinkCode
+// Импортируем функции доступа к данным из dataAccess.js (они теперь асинхронны)
+const {
+    getUserData,
+    updateUserData,
+} = require('./dataAccess'); // <--- ИЗМЕНЕНО: inMemoryDb -> dataAccess
+
+// Импортируем функции из utils.js (они тоже теперь асинхронны)
+const { generateAnonymousId, getTodayDateString, generateLinkCode } = require('./utils'); // <--- ИЗМЕНЕНО: generateUniqueLinkCode -> generateLinkCode
 
 /**
  * Регистрирует нового пользователя или возвращает данные существующего.
  * @param {string|number} telegramId - Telegram ID пользователя.
- * @returns {object} Данные пользователя.
+ * @returns {Promise<object>} Данные пользователя.
  */
 async function registerUser(telegramId) {
     const telegramIdStr = String(telegramId);
-    const users = getUsers();
+    let userData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
-    if (!users[telegramIdStr]) {
-        const anonId = generateAnonymousId();
-        const anonLinkCode = generateUniqueLinkCode(); // Генерируем уникальный код для ссылки
-        const today = getTodayDateString();
+    if (!userData) {
+        const anonId = await generateAnonymousId(); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const anonLinkCode = await generateLinkCode(); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const today = getTodayDateString(); // Эта функция синхронна
+
         const newUserData = {
-            anonymous_id: anonId,
-            anon_link_code: anonLinkCode, // НОВОЕ ПОЛЕ
-            registration_date: today,
-            messages_sent_today: 0,
-            last_sent_date: today,
-            is_auto_blocked: false,
-            auto_block_until: null,
-            current_command_step: null,
-            temp_data: {},
-            last_anon_sender_chat_id: null // НОВОЕ ПОЛЕ для ответа на анонимные сообщения
+            chatId: telegramIdStr, // Добавляем chatId для создания нового пользователя
+            anonymousId: anonId, // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+            anonLinkCode: anonLinkCode, // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
+            registeredAt: new Date(), // <--- ИЗМЕНЕНО: registration_date -> registeredAt, используем Date
+            messagesReceived: 0, // Добавлено, если не было
+            messagesSent: 0, // Добавлено, если не было
+            blockedUsers: [], // Добавлено, если не было
+            messagesSentToday: 0, // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
+            lastSentDate: today, // <--- ИЗМЕНЕНО: last_sent_date -> lastSentDate
+            isAutoBlocked: false, // <--- ИЗМЕНЕНО: is_auto_blocked -> isAutoBlocked
+            autoBlockUntil: null, // <--- ИЗМЕНЕНО: auto_block_until -> autoBlockUntil
+            currentCommandStep: null, // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+            tempData: {}, // <--- ИЗМЕНЕНО: temp_data -> tempData
+            lastAnonSenderChatId: null // <--- ИЗМЕНЕНО: last_anon_sender_chat_id -> lastAnonSenderChatId
         };
-        updateUserData(telegramIdStr, newUserData);
-        setAnonIdMapEntry(anonId, telegramIdStr);
-        setAnonLinkMapEntry(anonLinkCode, telegramIdStr); // Сохраняем связку кода ссылки и Telegram ID
+        userData = await updateUserData(telegramIdStr, newUserData); // <--- АСИНХРОННЫЙ ВЫЗОВ
         console.log(`[User] Новый пользователь зарегистрирован: ${telegramIdStr} -> ${anonId}, ссылка: ${anonLinkCode}`);
-        return newUserData;
+        return userData;
     } else {
-        console.log(`[User] Существующий пользователь: ${telegramIdStr} -> ${users[telegramIdStr].anonymous_id}`);
-        return users[telegramIdStr];
+        console.log(`[User] Существующий пользователь: ${telegramIdStr} -> ${userData.anonymousId}`); // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+        return userData;
     }
 }
 
 /**
  * Обновляет счетчик сообщений пользователя за день.
  * @param {string|number} telegramId - Telegram ID пользователя.
- * @param {object} userData - Текущие данные пользователя.
+ * @param {object} userData - Текущие данные пользователя (уже полученные из БД).
+ * @returns {Promise<void>}
  */
-function updateMessageCount(telegramId, userData) {
+async function updateMessageCount(telegramId, userData) {
     const today = getTodayDateString();
-    if (userData.last_sent_date !== today) {
-        userData.messages_sent_today = 0;
-        userData.last_sent_date = today;
+    if (userData.lastSentDate !== today) { // <--- ИЗМЕНЕНО: last_sent_date -> lastSentDate
+        userData.messagesSentToday = 0; // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
+        userData.lastSentDate = today; // <--- ИЗМЕНЕНО: last_sent_date -> lastSentDate
     }
-    userData.messages_sent_today++;
-    updateUserData(telegramId, userData);
+    userData.messagesSentToday++; // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
+    await updateUserData(telegramId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 }
 
 /**
  * Меняет анонимный ID пользователя на новый.
  * @param {string|number} telegramId - Telegram ID пользователя.
- * @returns {string} Новый анонимный ID.
+ * @returns {Promise<string>} Новый анонимный ID.
  */
 async function changeAnonymousId(telegramId) {
     const telegramIdStr = String(telegramId);
-    const users = getUsers();
-    const anonIdMap = getAnonIdMap();
+    let userData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
-    if (!users[telegramIdStr]) {
-        return (await registerUser(telegramIdStr)).anonymous_id;
+    if (!userData) {
+        userData = await registerUser(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
     }
 
-    const oldAnonId = users[telegramIdStr].anonymous_id;
-    const newAnonId = generateAnonymousId();
+    const oldAnonId = userData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+    const newAnonId = await generateAnonymousId(); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
-    users[telegramIdStr].anonymous_id = newAnonId;
-    updateUserData(telegramIdStr, users[telegramIdStr]);
-
-    deleteAnonIdMapEntry(oldAnonId);
-    setAnonIdMapEntry(newAnonId, telegramIdStr);
+    userData.anonymousId = newAnonId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+    await updateUserData(telegramIdStr, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
     console.log(`[User] ID пользователя ${telegramIdStr} изменен с ${oldAnonId} на ${newAnonId}`);
     return newAnonId;
@@ -84,30 +90,25 @@ async function changeAnonymousId(telegramId) {
 /**
  * Меняет анонимную ссылку пользователя на новую.
  * @param {string|number} telegramId - Telegram ID пользователя.
- * @returns {string} Новый код анонимной ссылки.
+ * @returns {Promise<string>} Новый код анонимной ссылки.
  */
 async function changeAnonymousLink(telegramId) {
     const telegramIdStr = String(telegramId);
-    const users = getUsers();
-    const anonLinkMap = getAnonLinkMap();
+    let userData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
-    if (!users[telegramIdStr]) {
-        return (await registerUser(telegramIdStr)).anon_link_code;
+    if (!userData) {
+        userData = await registerUser(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
     }
 
-    const oldAnonLinkCode = users[telegramIdStr].anon_link_code;
-    const newAnonLinkCode = generateUniqueLinkCode();
+    const oldAnonLinkCode = userData.anonLinkCode; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
+    const newAnonLinkCode = await generateLinkCode(); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
-    users[telegramIdStr].anon_link_code = newAnonLinkCode;
-    updateUserData(telegramIdStr, users[telegramIdStr]);
-
-    deleteAnonLinkMapEntry(oldAnonLinkCode); // Удаляем старую запись
-    setAnonLinkMapEntry(newAnonLinkCode, telegramIdStr); // Добавляем новую
+    userData.anonLinkCode = newAnonLinkCode; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
+    await updateUserData(telegramIdStr, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
     console.log(`[User] Анонимная ссылка пользователя ${telegramIdStr} изменена с ${oldAnonLinkCode} на ${newAnonLinkCode}`);
     return newAnonLinkCode;
 }
-
 
 module.exports = {
     registerUser,
