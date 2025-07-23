@@ -7,27 +7,27 @@ const userSchema = new mongoose.Schema({
     chatId: { // Telegram Chat ID пользователя
         type: String,
         required: true,
-        unique: true, // Каждый Telegram Chat ID уникален
-        index: true   // Индексируем для быстрого поиска
+        unique: true,
+        index: true
     },
     anonymousId: { // Анонимный ID, который выдается ботом
         type: String,
         required: true,
-        unique: true, // Каждый анонимный ID уникален
+        unique: true,
         index: true
     },
     linkCode: { // Код для анонимной ссылки (payload в /start)
         type: String,
         required: true,
-        unique: true, // Каждый код ссылки уникален
+        unique: true,
         index: true
     },
     blockedUsers: { // Массив анонимных ID, заблокированных этим пользователем
-        type: [String], // Массив строк
+        type: [String],
         default: []
     },
     registeredAt: { // Дата регистрации пользователя
-        type: Date, // Используем Date для лучшей работы с датами
+        type: Date,
         required: true
     },
     messagesReceived: { // Количество полученных сообщений
@@ -55,7 +55,7 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null
     }
-}, { timestamps: true }); // Добавляет createdAt и updatedAt автоматически
+}, { timestamps: true });
 
 // --- Создаем модель User ---
 const User = mongoose.model('User', userSchema);
