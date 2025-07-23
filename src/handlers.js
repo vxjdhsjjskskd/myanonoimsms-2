@@ -1,19 +1,24 @@
-// src/handlers.js - Модуль для обработки команд бота
+// src/handlers.js - Модуль для обработки команд бота (Финальная версия)
 
 const {
     getUserData,
     getTelegramIdByAnonLinkCode,
-    getAnonLinkMap, // Оставлено, если вдруг где-то используется напрямую, но в этой логике не нужно
     updateUserData,
 } = require('./dataAccess');
 
 const { registerUser, changeAnonymousLink } = require('./user');
-const { recordMessage, getRecentMessages } = require('./chat');
 const { sendAnonymousMessage, sendAnonymousReply } = require('./anonChat');
 const { getTodayDateString, checkAutoBlock, AUTO_BLOCK_DURATION_HOURS } = require('./utils');
 
 const MAX_MESSAGE_LENGTH = 500;
 
+/**
+ * Обрабатывает команду /start. Регистрирует нового пользователя или приветствует существующего.
+ * @param {string|number} telegramId - Telegram ID пользователя.
+ * @param {string|undefined} startPayload - Payload из ссылки /start (например, код анонимной ссылки).
+ * @param {string} botUsername - Имя пользователя бота (для формирования ссылки).
+ * @returns {Promise<string>} Сообщение для отправки пользователю.
+ */
 async function handleStart(telegramId, startPayload, botUsername) {
     const telegramIdStr = String(telegramId);
     console.log(`[HANDLER.handleStart] Получено /start от ${telegramIdStr}, Payload: ${startPayload || 'нет'}`);
@@ -29,6 +34,7 @@ async function handleStart(telegramId, startPayload, botUsername) {
                 senderData = await registerUser(telegramIdStr);
                 console.log(`[HANDLER.handleStart] Данные отправителя после регистрации:`, senderData);
             }
+            // Устанавливаем состояние для анонимной отправки
             senderData.currentCommandStep = 'awaiting_anon_message';
             senderData.tempData = { owner_telegram_id: ownerTelegramId };
             await updateUserData(telegramIdStr, senderData);
@@ -39,8 +45,10 @@ async function handleStart(telegramId, startPayload, botUsername) {
         } else if (ownerTelegramId === telegramIdStr) {
             const userData = await getUserData(telegramIdStr);
             console.log(`[HANDLER.handleStart] Пользователь ${telegramIdStr} перешел по своей ссылке. Данные:`, userData);
+            // Используем anonLinkCode или linkCode для совместимости со старыми записями
+            const currentAnonLinkCode = userData.anonLinkCode || userData.linkCode;
             return `Привет! Это ваша собственная анонимная ссылка. Вы не можете отправить анонимное сообщение самому себе.\n\n` +
-                   `Ваша ссылка для анонимных вопросов: \`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``;
+                   `Ваша ссылка для анонимных вопросов: \`https://t.me/${botUsername}?start=${currentAnonLinkCode}\``;
         } else {
             console.log(`[HANDLER.handleStart] Ссылка с payload ${startPayload} недействительна.`);
             return `❌ Ссылка недействительна или больше не активна.`;
@@ -50,7 +58,9 @@ async function handleStart(telegramId, startPayload, botUsername) {
     console.log(`[HANDLER.handleStart] Обычный /start от ${telegramIdStr}. Регистрируем/получаем пользователя.`);
     const userData = await registerUser(telegramIdStr);
     console.log(`[HANDLER.handleStart] Данные пользователя после регистрации/получения:`, userData);
-    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``;
+    // Используем anonLinkCode или linkCode для совместимости со старыми записями
+    const currentAnonLinkCode = userData.anonLinkCode || userData.linkCode;
+    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${currentAnonLinkCode}\``;
     console.log(`[HANDLER.handleStart] Формируемая ссылка: ${formattedAnonLink}`);
 
     return (
@@ -61,6 +71,12 @@ async function handleStart(telegramId, startPayload, botUsername) {
     );
 }
 
+/**
+ * Обрабатывает команду /mylink. Показывает анонимную ссылку пользователя.
+ * @param {string|number} telegramId - Telegram ID пользователя.
+ * @param {string} botUsername - Имя пользователя бота.
+ * @returns {Promise<string>} Сообщение для отправки пользователю.
+ */
 async function handleMyLink(telegramId, botUsername) {
     console.log(`[HANDLER.handleMyLink] Получено /mylink от ${telegramId}.`);
     const userData = await getUserData(telegramId);
@@ -69,23 +85,36 @@ async function handleMyLink(telegramId, botUsername) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
     console.log(`[HANDLER.handleMyLink] Данные пользователя для /mylink:`, userData);
-    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``;
+    // Используем anonLinkCode или linkCode для совместимости со старыми записями
+    const currentAnonLinkCode = userData.anonLinkCode || userData.linkCode;
+    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${currentAnonLinkCode}\``;
     console.log(`[HANDLER.handleMyLink] Формируемая ссылка для /mylink: ${formattedAnonLink}`);
     return `Ваша личная ссылка для анонимных вопросов: ${formattedAnonLink}`;
 }
 
+// Функции, которые больше не поддерживаются
 async function handleMyId(telegramId) {
     return "Команда /myid больше не поддерживается. Используйте /mylink для получения вашей анонимной ссылки.";
 }
-
 async function initiateSendMessage(senderTelegramId) {
     return "Команда /send больше не поддерживается. Отправка анонимных сообщений происходит только через вашу личную ссылку.";
 }
-
 async function handleSendMessageStep() {
     return { responseForSender: "Эта функция больше не поддерживается." };
 }
+async function handleInbox(telegramId) {
+    return "📬 У вас пока нет новых сообщений. История сообщений не сохраняется.";
+}
+async function handleChangeId(telegramId) {
+    return "Команда /changeid больше не поддерживается, так как анонимный ID не используется.";
+}
 
+/**
+ * Обрабатывает команду /reply. Отвечает на последнее анонимное сообщение.
+ * @param {string|number} ownerTelegramId - Telegram ID владельца ссылки (отвечающего).
+ * @param {string[]} args - Массив аргументов команды (текст ответа).
+ * @returns {Promise<object>} Объект с результатом для владельца и данными для анонимного отправителя.
+ */
 async function handleReply(ownerTelegramId, args) {
     const replyText = args.join(' ');
     if (!replyText) {
@@ -95,10 +124,12 @@ async function handleReply(ownerTelegramId, args) {
     return result;
 }
 
-async function handleInbox(telegramId) {
-    return "📬 У вас пока нет новых сообщений. История сообщений не сохраняется.";
-}
-
+/**
+ * Обрабатывает команду /block. Блокирует указанного пользователя по его Telegram Chat ID.
+ * @param {string|number} blockerTelegramId - Telegram ID блокирующего пользователя.
+ * @param {string[]} args - Массив аргументов команды (Telegram Chat ID пользователя для блокировки).
+ * @returns {Promise<string>} Сообщение для отправки блокирующему пользователю.
+ */
 async function handleBlock(blockerTelegramId, args) {
     const blockerData = await getUserData(blockerTelegramId);
     if (!blockerData) {
@@ -129,6 +160,12 @@ async function handleBlock(blockerTelegramId, args) {
     return `✅ Пользователь **${blockedChatId}** успешно заблокирован. Он больше не сможет отправлять вам сообщения.`;
 }
 
+/**
+ * Обрабатывает команду /unblock. Разблокирует указанного пользователя по его Telegram Chat ID.
+ * @param {string|number} unblockerTelegramId - Telegram ID разблокирующего пользователя.
+ * @param {string[]} args - Массив аргументов команды (Telegram Chat ID пользователя для разблокировки).
+ * @returns {Promise<string>} Сообщение для отправки разблокирующему пользователю.
+ */
 async function handleUnblock(unblockerTelegramId, args) {
     const unblockerData = await getUserData(unblockerTelegramId);
     if (!unblockerData) {
@@ -150,6 +187,11 @@ async function handleUnblock(unblockerTelegramId, args) {
     return `✅ Пользователь **${unblockedChatId}** успешно разблокирован.`;
 }
 
+/**
+ * Обрабатывает команду /blocked. Показывает список заблокированных пользователей (по Telegram Chat ID).
+ * @param {string|number} telegramId - Telegram ID пользователя.
+ * @returns {Promise<string>} Сообщение со списком заблокированных пользователей.
+ */
 async function handleBlocked(telegramId) {
     const userData = await getUserData(telegramId);
     if (!userData) {
@@ -169,17 +211,19 @@ async function handleBlocked(telegramId) {
     return response;
 }
 
-async function handleChangeId(telegramId) {
-    return "Команда /changeid больше не поддерживается, так как анонимный ID не используется.";
-}
-
+/**
+ * Обрабатывает команду /changelink. Меняет анонимную ссылку пользователя.
+ * @param {string|number} telegramId - Telegram ID пользователя.
+ * @param {string} botUsername - Имя пользователя бота.
+ * @returns {Promise<string>} Сообщение для отправки пользователю.
+ */
 async function handleChangeLink(telegramId, botUsername) {
     const userData = await getUserData(telegramId);
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
 
-    const oldAnonLinkCode = userData.anonLinkCode;
+    const oldAnonLinkCode = userData.anonLinkCode || userData.linkCode; // Учитываем старое поле
     const newAnonLinkCode = await changeAnonymousLink(telegramId);
 
     const formattedNewAnonLink = `\`https://t.me/${botUsername}?start=${newAnonLinkCode}\``;
@@ -187,6 +231,10 @@ async function handleChangeLink(telegramId, botUsername) {
     return `✅ Ваша анонимная ссылка успешно изменена с \`https://t.me/${botUsername}?start=${oldAnonLinkCode}\` на ${formattedNewAnonLink}.`;
 }
 
+/**
+ * Обрабатывает команду /help. Показывает справку по командам.
+ * @returns {string} Сообщение со справкой.
+ */
 function handleHelp() {
     return (
         "**📚 Справка по командам Анонимной почты:**\n\n" +
@@ -203,6 +251,12 @@ function handleHelp() {
     );
 }
 
+/**
+ * Общий обработчик текстовых сообщений, который управляет состоянием команд.
+ * @param {string|number} chatId - ID чата пользователя.
+ * @param {string} messageText - Текст сообщения пользователя.
+ * @returns {Promise<object|null>} Объект с результатом для отправителя/получателя или null, если сообщение не обработано.
+ */
 async function handleUserTextMessage(chatId, messageText) {
     const userData = await getUserData(chatId);
     if (!userData) {
@@ -211,6 +265,7 @@ async function handleUserTextMessage(chatId, messageText) {
 
     if (userData.currentCommandStep === 'awaiting_anon_message') {
         const result = await sendAnonymousMessage(chatId, userData.tempData.owner_telegram_id, messageText);
+        // После отправки анонимного сообщения, сбрасываем состояние
         userData.currentCommandStep = null;
         userData.tempData = {};
         await updateUserData(chatId, userData);
