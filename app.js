@@ -8,26 +8,24 @@ const { connectDb } = require('./src/db'); // Импорт функции под
 const {
     handleStart,
     handleMyLink,
-    handleMyId,
-    initiateSendMessage,
-    handleSendMessageStep,
-    handleInbox,
+    handleMyId, // Оставлено для совместимости, но возвращает сообщение об удалении
+    initiateSendMessage, // Оставлено для совместимости, но возвращает сообщение об удалении
+    handleSendMessageStep, // Оставлено для совместимости, но возвращает сообщение об удалении
+    handleInbox, // Оставлено для совместимости, но возвращает сообщение об удалении
     handleReply,
     handleBlock,
     handleUnblock,
     handleBlocked,
-    handleChangeId,
+    handleChangeId, // Оставлено для совместимости, но возвращает сообщение об удалении
     handleChangeLink,
     handleHelp,
-    handleUserTextMessage // <--- Добавлено
-} = require('./src/handlers'); // <--- ИЗМЕНЕНО: handlers.js
+    handleUserTextMessage
+} = require('./src/handlers');
 
 const { getUserData, updateUserData } = require('./src/dataAccess'); // Для прямого доступа в app.js
-const { generateAnonymousId, generateLinkCode } = require('./src/utils'); // Для прямого доступа в app.js
 
 // Конфигурация
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// Render сам предоставляет PORT, используем его. Если нет, то 3000 как запасной.
 const PORT = process.env.PORT || 3000;
 
 if (!TOKEN) {
@@ -68,7 +66,6 @@ bot.getMe().then(me => {
 // --- Инициализация базы данных MongoDB Atlas ---
 connectDb().then(() => {
     console.log('✅ База данных MongoDB Atlas подключена. Запускаем логику бота...');
-    // После успешного подключения к БД, можно инициализировать остальную логику
     initializeBotLogic();
 }).catch(err => {
     console.error('❌ Критическая ошибка подключения к базе данных:', err);
@@ -80,75 +77,62 @@ async function initializeBotLogic() {
     // Установка команд меню
     bot.setMyCommands([
         { command: 'start', description: '🚀 Запустить бота' },
-        { command: 'stats', description: '📊 Статистика' },
-        { command: 'changelink', description: '🔗 Изменить ссылку' }
+        { command: 'mylink', description: '🔗 Моя ссылка' },
+        { command: 'reply', description: '↩️ Ответить' },
+        { command: 'block', description: '🚫 Заблокировать' },
+        { command: 'unblock', description: '✅ Разблокировать' },
+        { command: 'blocked', description: '📋 Мои блокировки' },
+        { command: 'changelink', description: '🔄 Сменить ссылку' },
+        { command: 'help', description: '📚 Помощь' },
     ]);
+
+    // --- ОБРАБОТЧИКИ КОМАНД И КНОПОК ---
 
     // Обработчик команды /start
     bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         const chatId = msg.chat.id;
         const startPayload = match ? match[1] : undefined;
-
-        console.log(`👤 /start от ${chatId}, payload: ${startPayload || 'нет'}`);
-        const response = await handleStart(chatId, startPayload, BOT_USERNAME); // <--- АСИНХРОННЫЙ ВЫЗОВ
-        bot.sendMessage(chatId, response, { parse_mode: 'Markdown' }); // mainKeyboard не нужна, если она не глобальная
+        const response = await handleStart(chatId, startPayload, BOT_USERNAME);
+        bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
     // Обработчик кнопки "Моя ссылка" или команды /mylink
     bot.onText(/\/mylink|Моя ссылка/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /mylink или кнопки "Моя ссылка" для chat ID: ${chatId}`);
-        const response = await handleMyLink(chatId, BOT_USERNAME); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const response = await handleMyLink(chatId, BOT_USERNAME);
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
-    // Обработчик кнопки "Мой ID" или команды /myid
+    // Обработчик кнопки "Мой ID" или команды /myid (теперь возвращает сообщение об удалении)
     bot.onText(/\/myid|Мой ID/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /myid или кнопки "Мой ID" для chat ID: ${chatId}`);
-        const response = await handleMyId(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const response = await handleMyId(chatId);
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
-    // Обработчик кнопки "Отправить" или команды /send (инициирует пошаговую отправку)
+    // Обработчик кнопки "Отправить" или команды /send (теперь возвращает сообщение об удалении)
     bot.onText(/\/send|Отправить/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /send или кнопки "Отправить" для chat ID: ${chatId}`);
-        // Если это команда /send с аргументами (старый формат), обрабатываем ее напрямую
-        const match = msg.text.match(/\/send (.+)/);
-        if (match && match[1]) {
-            const args = match[1].split(' ');
-            const result = await handleSendMessageStep(chatId, null, args[0], args.slice(1).join(' ')); // <--- АСИНХРОННЫЙ ВЫЗОВ
-            bot.sendMessage(chatId, result.responseForSender || result, { parse_mode: 'Markdown' });
-
-            if (result.recipientTelegramId && result.senderAnonId && result.messageText) {
-                bot.sendMessage(result.recipientTelegramId, `📬 Сообщение от **${result.senderAnonId}**: ${result.messageText}`, { parse_mode: 'Markdown' });
-            }
-        } else {
-            // Если просто нажата кнопка "Отправить" или введена /send без аргументов, инициируем пошаговый процесс
-            const response = await initiateSendMessage(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
-            bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
-        }
+        const response = await initiateSendMessage(chatId);
+        bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
-    // Обработчик кнопки "Входящие" или команды /inbox
+    // Обработчик кнопки "Входящие" или команды /inbox (теперь возвращает сообщение об удалении)
     bot.onText(/\/inbox|Входящие/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /inbox или кнопки "Входящие" для chat ID: ${chatId}`);
-        const response = await handleInbox(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const response = await handleInbox(chatId);
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
     // Обработчик кнопки "Ответить" или команды /reply
     bot.onText(/\/reply (.+)|Ответить/, async (msg, match) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /reply или кнопки "Ответить" для chat ID: ${chatId}`);
-        const args = match ? match[1].split(' ') : []; // Получаем аргументы, если это команда
+        const args = match ? match[1].split(' ') : [];
 
-        if (msg.text === 'Ответить') {
+        if (msg.text === 'Ответить' && !match) { // Если просто нажата кнопка "Ответить" без текста
             bot.sendMessage(chatId, 'Пожалуйста, используйте формат: `/reply [ваш ответ]`', { parse_mode: 'Markdown' });
         } else {
-            const result = await handleReply(chatId, args); // <--- АСИНХРОННЫЙ ВЫЗОВ
+            const result = await handleReply(chatId, args);
             bot.sendMessage(chatId, result.responseForOwner || result, { parse_mode: 'Markdown' });
 
             if (result.recipientChatId && result.replyText) {
@@ -159,36 +143,35 @@ async function initializeBotLogic() {
 
     // Обработчик кнопки "Заблокировать" или команды /block
     bot.onText(/\/block|Заблокировать/, async (msg) => {
-        const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /block или кнопки "Заблокировать" для chat ID: ${chatId}`);
+        const chatId = msg.chat.id.toString(); // Получаем Chat ID текущего пользователя
         if (msg.text === 'Заблокировать') {
-            bot.sendMessage(chatId, 'Пожалуйста, используйте формат: `/block [ID пользователя для блокировки]`', { parse_mode: 'Markdown' });
+            // Если нажата кнопка, но нет аргументов, просим ввести ID
+            bot.sendMessage(chatId, 'Пожалуйста, используйте формат: `/block [Telegram Chat ID пользователя для блокировки]`', { parse_mode: 'Markdown' });
         } else {
             const match = msg.text.match(/\/block (.+)/);
             if (match && match[1]) {
                 const args = match[1].split(' ');
-                const response = await handleBlock(chatId, args); // <--- АСИНХРОННЫЙ ВЫЗОВ
+                const response = await handleBlock(chatId, args);
                 bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
             } else {
-                bot.sendMessage(chatId, 'Неверный формат. Используйте: `/block [ID пользователя для блокировки]`', { parse_mode: 'Markdown' });
+                bot.sendMessage(chatId, 'Неверный формат. Используйте: `/block [Telegram Chat ID пользователя для блокировки]`', { parse_mode: 'Markdown' });
             }
         }
     });
 
     // Обработчик кнопки "Разблокировать" или команды /unblock
     bot.onText(/\/unblock|Разблокировать/, async (msg) => {
-        const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /unblock или кнопки "Разблокировать" для chat ID: ${chatId}`);
+        const chatId = msg.chat.id.toString();
         if (msg.text === 'Разблокировать') {
-            bot.sendMessage(chatId, 'Пожалуйста, используйте формат: `/unblock [ID пользователя для разблокировки]`', { parse_mode: 'Markdown' });
+            bot.sendMessage(chatId, 'Пожалуйста, используйте формат: `/unblock [Telegram Chat ID пользователя для разблокировки]`', { parse_mode: 'Markdown' });
         } else {
             const match = msg.text.match(/\/unblock (.+)/);
             if (match && match[1]) {
                 const args = match[1].split(' ');
-                const response = await handleUnblock(chatId, args); // <--- АСИНХРОННЫЙ ВЫЗОВ
+                const response = await handleUnblock(chatId, args);
                 bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
             } else {
-                bot.sendMessage(chatId, 'Неверный формат. Используйте: `/unblock [ID пользователя для разблокировки]`', { parse_mode: 'Markdown' });
+                bot.sendMessage(chatId, 'Неверный формат. Используйте: `/unblock [Telegram Chat ID пользователя для разблокировки]`', { parse_mode: 'Markdown' });
             }
         }
     });
@@ -196,96 +179,97 @@ async function initializeBotLogic() {
     // Обработчик кнопки "Мои блокировки" или команды /blocked
     bot.onText(/\/blocked|Мои блокировки/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /blocked или кнопки "Мои блокировки" для chat ID: ${chatId}`);
-        const response = await handleBlocked(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const response = await handleBlocked(chatId);
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
-    // Обработчик кнопки "Сменить ID" или команды /changeid
+    // Обработчик кнопки "Сменить ID" или команды /changeid (теперь возвращает сообщение об удалении)
     bot.onText(/\/changeid|Сменить ID/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /changeid или кнопки "Сменить ID" для chat ID: ${chatId}`);
-        const response = await handleChangeId(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const response = await handleChangeId(chatId);
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
     // Обработчик кнопки "Сменить ссылку" или команды /changelink
     bot.onText(/\/changelink|Сменить ссылку/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /changelink или кнопки "Сменить ссылку" для chat ID: ${chatId}`);
-        const response = await handleChangeLink(chatId, BOT_USERNAME); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const response = await handleChangeLink(chatId, BOT_USERNAME);
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
     // Обработчик кнопки "Помощь" или команды /help
     bot.onText(/\/help|Помощь/, async (msg) => {
         const chatId = msg.chat.id;
-        console.log(`[Bot Handler] Обработка /help или кнопки "Помощь" для chat ID: ${chatId}`);
-        const response = handleHelp(); // Эта функция синхронна
+        const response = handleHelp();
         bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
     });
 
-    // --- ГЛАВНЫЙ ОБРАБОТЧИК ДЛЯ ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ (для пошаговых команд и анонимных вопросов) ---
+    // --- ГЛАВНЫЙ ОБРАБОТЧИК ДЛЯ ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ (для анонимных вопросов и ответов) ---
     bot.on('message', async (msg) => {
-        const chatId = msg.chat.id;
+        const chatId = msg.chat.id.toString();
         const messageText = msg.text;
 
         // Игнорируем сообщения, которые начинаются с '/' (команды)
         if (messageText && messageText.startsWith('/')) {
             return;
         }
-        // Игнорируем сообщения, которые являются текстом кнопок
+        // Игнорируем сообщения, которые являются текстом кнопок (если они не команды)
         const buttonTexts = ['Моя ссылка', 'Мой ID', 'Отправить', 'Входящие', 'Ответить', 'Мои блокировки', 'Заблокировать', 'Разблокировать', 'Сменить ID', 'Сменить ссылку', 'Помощь'];
-        if (buttonTexts.includes(messageText)) {
+        if (buttonTexts.includes(messageText) && !messageText.startsWith('/')) {
             return;
         }
 
-        console.log(`[Bot Handler] Получено текстовое сообщение (не команда/кнопка) от chat ID: ${chatId}: "${messageText}"`);
+        console.log(`[App.onMessage] Получено текстовое сообщение от chat ID: ${chatId}: "${messageText}"`);
 
-        // Проверяем, находится ли пользователь в середине пошаговой команды
-        const userData = await getUserData(chatId); // Получаем данные пользователя для проверки состояния
+        const userData = await getUserData(chatId);
         if (!userData) {
             return bot.sendMessage(chatId, 'Сначала используйте команду /start для регистрации.');
         }
 
         let result = null;
-        if (userData.currentCommandStep === 'awaiting_recipient_id' || userData.currentCommandStep === 'awaiting_message_text') {
-            result = await handleSendMessageStep(chatId, messageText);
-        } else if (userData.currentCommandStep === 'awaiting_anon_message') {
-            // Если пользователь пришел по анонимной ссылке и ждет сообщения
+
+        if (userData.currentCommandStep === 'awaiting_anon_message') {
+            // Пользователь перешел по анонимной ссылке и ждет сообщения
             result = await sendAnonymousMessage(chatId, userData.tempData.owner_telegram_id, messageText);
             // После отправки анонимного сообщения, сбрасываем состояние
             userData.currentCommandStep = null;
             userData.tempData = {};
             await updateUserData(chatId, userData);
+
         } else if (msg.reply_to_message && userData.lastAnonSenderChatId) {
-            // Если это ответ на анонимное сообщение
-            result = await handleReply(chatId, [messageText]); // Передаем текст как аргумент
+            // Если это ответ на анонимное сообщение (через свайп)
+            result = await handleReply(chatId, [messageText]);
+
+        } else {
+            // Если это обычное текстовое сообщение, которое не является частью пошаговой команды
+            bot.sendMessage(chatId, 'Я понимаю только команды или кнопки. Используйте /help для справки.', { parse_mode: 'Markdown' });
+            return;
         }
 
 
         if (result) {
-            // Если handleUserTextMessage вернул результат, это означает, что сообщение было частью пошаговой команды
-            bot.sendMessage(chatId, result.responseForSender || result.responseForOwner || result, { parse_mode: 'Markdown' });
+            // Обработка результата отправки анонимного сообщения
+            if (result.ownerTelegramId && result.senderChatId && result.messageText) {
+                // Это новое анонимное сообщение, отправляем владельцу ссылки
+                const ownerData = await getUserData(result.ownerTelegramId); // Получаем данные владельца для блокировок
+                if (ownerData.blockedUsers.includes(result.senderChatId)) {
+                    // Если отправитель заблокирован владельцем, не отправляем сообщение
+                    bot.sendMessage(result.senderChatId, `🚫 Ваше сообщение не может быть доставлено, так как вы заблокированы получателем.`);
+                    return;
+                }
 
-            // Если это было обычное сообщение, отправляем его получателю
-            if (result.recipientTelegramId && result.senderAnonId && result.messageText) {
-                bot.sendMessage(result.recipientTelegramId, `📬 Сообщение от **${result.senderAnonId}**: ${result.messageText}`, { parse_mode: 'Markdown' });
-            }
-            // Если это был анонимный вопрос, отправляем его владельцу ссылки
-            else if (result.ownerTelegramId && result.senderChatId && result.messageText) { // ownerTelegramId - это получатель анонимного сообщения
                 bot.sendMessage(result.ownerTelegramId, `🏄‍♂️ У тебя новое анонимное сообщение!\n\n${result.messageText}\n\n↩️ Свайпни для ответа.`, {
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [
-                            [{ text: '❌ Заблокировать', callback_data: 'block_sender' }]
+                            [{ text: '❌ Заблокировать', callback_data: `block_sender:${result.senderChatId}` }] // Передаем Chat ID отправителя
                         ]
                     }
                 });
                 // Сохраняем lastAnonSenderChatId для владельца ссылки
-                const ownerData = await getUserData(result.ownerTelegramId);
                 ownerData.lastAnonSenderChatId = String(result.senderChatId);
-                ownerData.lastAnonSender = (await getUserData(result.senderChatId)).anonymousId; // Сохраняем анонимный ID отправителя
+                // lastAnonSender теперь будет хранить Chat ID отправителя для кнопки "Заблокировать"
+                ownerData.lastAnonSender = String(result.senderChatId);
                 await updateUserData(result.ownerTelegramId, ownerData);
 
                 // Отправляем отправителю подтверждение и его ссылку
@@ -297,16 +281,22 @@ async function initializeBotLogic() {
                     }
                 });
                 const senderPromoData = await getUserData(result.senderChatId);
+                const senderPromoLinkCode = senderPromoData.anonLinkCode || senderPromoData.linkCode; // Учитываем старое поле
                 bot.sendMessage(result.senderChatId,
                     `🚀 Начни получать анонимные сообщения прямо сейчас!\n\n` +
                     `Твоя ссылка:\n` +
-                    `👉 https://t.me/${BOT_USERNAME}?start=${senderPromoData.anonLinkCode}\n\n` +
+                    `👉 https://t.me/${BOT_USERNAME}?start=${senderPromoLinkCode}\n\n` +
                     `Размести эту ссылку ☝️ в описании профиля Telegram/TikTok/Instagram, чтобы начать получать анонимные сообщения 💬`
                 );
 
             }
-            // Если это был ответ на анонимное сообщение
+            // Обработка результата ответа на анонимное сообщение
             else if (result.recipientChatId && result.replyText) {
+                const recipientData = await getUserData(result.recipientChatId);
+                if (recipientData && recipientData.blockedUsers.includes(chatId)) { // Проверяем, заблокирован ли отвечающий
+                    bot.sendMessage(chatId, `🚫 Ваш ответ не может быть доставлен, так как вы заблокированы получателем.`);
+                    return;
+                }
                 bot.sendMessage(result.recipientChatId, result.replyText, { parse_mode: 'Markdown' });
                 // Добавляем инлайн кнопку "Написать ещё" для анонимного отправителя
                 bot.sendMessage(result.recipientChatId, '🕊 Ваш ответ отправлен успешно', {
@@ -317,10 +307,6 @@ async function initializeBotLogic() {
                     }
                 });
             }
-        } else {
-            // Если handleUserTextMessage вернул null, это обычное текстовое сообщение,
-            // на которое бот может ответить, что не понимает.
-            bot.sendMessage(chatId, 'Я понимаю только команды или кнопки. Используйте /help для справки.', { parse_mode: 'Markdown' });
         }
     });
 
@@ -328,12 +314,34 @@ async function initializeBotLogic() {
     bot.on('callback_query', async (callbackQuery) => {
         const message = callbackQuery.message;
         const data = callbackQuery.data;
-        const chatId = message.chat.id;
+        const chatId = message.chat.id.toString();
 
         await bot.answerCallbackQuery(callbackQuery.id);
 
         const userData = await getUserData(chatId);
         if (!userData) return;
+
+        if (data.startsWith('block_sender:')) {
+            const blockedChatId = data.split(':')[1];
+            if (!userData.blockedUsers.includes(blockedChatId)) {
+                userData.blockedUsers.push(blockedChatId);
+                await updateUserData(chatId, userData);
+            }
+            // Обновляем кнопку на "Разблокировать" или "Очистить черный список"
+            bot.editMessageReplyMarkup(
+                {
+                    inline_keyboard: [
+                        [{ text: '🗑️ Очистить черный список', callback_data: 'clear_blacklist' }]
+                    ]
+                },
+                {
+                    chat_id: chatId,
+                    message_id: message.message_id
+                }
+            );
+            bot.sendMessage(chatId, `🚫 Отправитель **${blockedChatId}** заблокирован.`);
+            return;
+        }
 
         switch (data) {
             case 'cancel_message':
@@ -350,8 +358,13 @@ async function initializeBotLogic() {
                 break;
 
             case 'send_more':
-                // lastAnonSenderChatId используется для "Ответить", а owner_telegram_id для "Отправить"
-                let targetOwnerForSendMore = userData.tempData.owner_telegram_id || userData.lastAnonSenderChatId;
+                // targetOwnerForSendMore - это Chat ID владельца ссылки, которому отправлялось сообщение
+                let targetOwnerForSendMore = userData.tempData.owner_telegram_id; // Для тех, кто пришел по ссылке
+                if (!targetOwnerForSendMore && userData.lastAnonSenderChatId) {
+                    // Если кнопка "Отправить ещё" нажата после ответа, то lastAnonSenderChatId - это владелец ссылки
+                    // (т.е. тот, кому мы только что ответили, и кому хотим отправить еще одно анонимное сообщение)
+                    targetOwnerForSendMore = userData.lastAnonSenderChatId;
+                }
 
                 if (targetOwnerForSendMore) {
                     userData.currentCommandStep = 'awaiting_anon_message';
@@ -364,7 +377,7 @@ async function initializeBotLogic() {
                                 [{ text: '✖️ Отменить', callback_data: 'cancel_message' }]
                             ]
                         }
-                    }
+                    };
 
                     bot.sendMessage(chatId,
                         `🚀 Здесь можно отправить анонимное сообщение человеку, который опубликовал эту ссылку.\n\n` +
@@ -373,28 +386,7 @@ async function initializeBotLogic() {
                         keyboard
                     );
                 } else {
-                    bot.sendMessage(chatId, 'Не удалось определить, кому отправить ещё сообщение. Пожалуйста, начните новую отправку через /start или /send.');
-                }
-                break;
-
-            case 'block_sender':
-                if (userData.lastAnonSender) { // lastAnonSender - это анонимный ID отправителя
-                    if (!userData.blockedUsers.includes(userData.lastAnonSender)) {
-                        userData.blockedUsers.push(userData.lastAnonSender);
-                        await updateUserData(chatId, userData);
-                    }
-                    bot.editMessageReplyMarkup(
-                        {
-                            inline_keyboard: [
-                                [{ text: '🗑️ Очистить черный список', callback_data: 'clear_blacklist' }]
-                            ]
-                        },
-                        {
-                            chat_id: chatId,
-                            message_id: message.message_id
-                        }
-                    );
-                    bot.sendMessage(chatId, `🚫 Отправитель **${userData.lastAnonSender}** заблокирован.`);
+                    bot.sendMessage(chatId, 'Не удалось определить, кому отправить ещё сообщение. Пожалуйста, начните новую отправку через /start.');
                 }
                 break;
 
@@ -402,7 +394,7 @@ async function initializeBotLogic() {
                 userData.blockedUsers = [];
                 await updateUserData(chatId, userData);
                 bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] },
+                    { inline_keyboard: [] }, // Убираем инлайн-кнопки
                     {
                         chat_id: chatId,
                         message_id: message.message_id
@@ -412,7 +404,7 @@ async function initializeBotLogic() {
                 break;
         }
     });
-} // <--- ЗАКРЫВАЮЩАЯ СКОБКА initializeBotLogic() - ЭТО ПРАВИЛЬНОЕ ЗАВЕРШЕНИЕ ФУНКЦИИ
+}
 
 // Обработка ошибок
 bot.on('polling_error', (error) => {
@@ -424,3 +416,4 @@ bot.on('error', (error) => {
 });
 
 console.log('🚀 Бот запускается...');
+                                                  
