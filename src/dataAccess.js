@@ -46,7 +46,13 @@ async function updateUserData(chatId, userData) {
  * @returns {Promise<string|null>} Telegram ID пользователя или null, если не найден.
  */
 async function getTelegramIdByAnonLinkCode(anonLinkCode) {
-    const user = await User.findOne({ anonLinkCode: anonLinkCode.toUpperCase() }).select('chatId').lean();
+    // Ищем по новому полю anonLinkCode или по старому linkCode для совместимости
+    const user = await User.findOne({
+        $or: [
+            { anonLinkCode: anonLinkCode.toUpperCase() },
+            { linkCode: anonLinkCode.toUpperCase() }
+        ]
+    }).select('chatId').lean();
     return user ? user.chatId : null;
 }
 
@@ -55,13 +61,14 @@ async function getTelegramIdByAnonLinkCode(anonLinkCode) {
  * @returns {Promise<object>} Объект, где ключ - linkCode, значение - chatId.
  */
 async function getAnonLinkMap() {
-    const users = await User.find({}).select('anonLinkCode chatId').lean();
+    const users = await User.find({}).select('anonLinkCode linkCode chatId').lean();
     const linkMap = {};
     users.forEach(user => {
-        if (user.anonLinkCode) {
-            linkMap[user.anonLinkCode.toUpperCase()] = user.chatId;
+        const code = user.anonLinkCode || user.linkCode; // Предпочитаем anonLinkCode, но используем linkCode если нет
+        if (code) {
+            linkMap[code.toUpperCase()] = user.chatId;
         } else {
-            console.warn(`[DB Access] Пользователь с chatId ${user.chatId} не имеет anonLinkCode.`);
+            console.warn(`[DB Access] Пользователь с chatId ${user.chatId} не имеет anonLinkCode или linkCode.`);
         }
     });
     return linkMap;
