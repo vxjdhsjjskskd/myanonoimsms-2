@@ -1,4 +1,4 @@
-// src/models.js - Определения схем и моделей Mongoose
+// src/models.js - Определения схем и моделей Mongoose (Упрощенная версия)
 
 const mongoose = require('mongoose');
 
@@ -10,33 +10,27 @@ const userSchema = new mongoose.Schema({
         unique: true, // Каждый Telegram ID уникален
         index: true   // Индексируем для быстрого поиска
     },
-    anonymousId: { // Анонимный ID, который выдается ботом
-        type: String,
-        required: true,
-        unique: true, // Каждый анонимный ID уникален
-        index: true
-    },
     anonLinkCode: { // Код для анонимной ссылки (payload в /start)
         type: String,
         required: true,
         unique: true, // Каждый код ссылки уникален
         index: true
     },
-    blockedUsers: { // Массив анонимных ID, заблокированных этим пользователем
-        type: [String], // Массив строк
+    blockedUsers: { // Массив Telegram Chat ID, заблокированных этим пользователем
+        type: [String], // Массив строк (Telegram Chat IDs)
         default: []
     },
     registeredAt: { // Дата регистрации пользователя
         type: Date, // Используем Date объект для лучшей работы с датами
         required: true
     },
-    messagesSentToday: { // Количество сообщений, отправленных сегодня (для лимитов)
+    messagesReceived: { // Количество полученных сообщений
         type: Number,
         default: 0
     },
-    lastSentDate: { // Дата последнего отправленного сообщения
-        type: String, // YYYY-MM-DD
-        default: null
+    messagesSent: { // Количество отправленных сообщений
+        type: Number,
+        default: 0
     },
     isAutoBlocked: { // Флаг автоблокировки (за мат/спам)
         type: Boolean,
@@ -46,11 +40,11 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
-    currentCommandStep: { // Для пошаговых команд (например, 'awaiting_recipient_id')
+    currentCommandStep: { // Для пошаговых команд (например, 'awaiting_anon_message')
         type: String,
         default: null
     },
-    tempData: { // Временные данные для пошаговых команд (например, { recipient_id: 'XYZ' })
+    tempData: { // Временные данные для пошаговых команд (например, { owner_telegram_id: 'XYZ' })
         type: mongoose.Schema.Types.Mixed, // Позволяет хранить любые типы данных
         default: {}
     },
