@@ -16,6 +16,12 @@ const userSchema = new mongoose.Schema({
         unique: true, // Каждый код ссылки уникален
         index: true
     },
+    // Поле linkCode оставлено для совместимости со старыми записями в БД, если они есть
+    linkCode: {
+        type: String,
+        unique: false, // Не обязательно уникальное, так как основное anonLinkCode
+        sparse: true // Позволяет индексировать только те документы, где это поле существует
+    },
     blockedUsers: { // Массив Telegram Chat ID, заблокированных этим пользователем
         type: [String], // Массив строк (Telegram Chat IDs)
         default: []
