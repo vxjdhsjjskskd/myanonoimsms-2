@@ -4,7 +4,7 @@ const { User } = require('./models'); // Импортируем модель Use
 
 // --- Константы ---
 const ANONYMOUS_ID_LENGTH = 6;
-const ANONYMOUS_LINK_CODE_LENGTH = 8;
+const ANONYMOUS_LINK_CODE_LENGTH = 8; // Длина кода для анонимной ссылки
 const AUTO_BLOCK_KEYWORDS = ["мат", "спам", "ругательство", "непристойность"];
 const AUTO_BLOCK_DURATION_HOURS = 24;
 
@@ -21,6 +21,7 @@ async function generateAnonymousId() {
         for (let i = 0; i < ANONYMOUS_ID_LENGTH; i++) {
             newId += chars.charAt(Math.floor(Math.random() * chars.length));
         }
+        // Проверяем уникальность в базе данных
         const existingUser = await User.findOne({ anonymousId: newId });
         if (!existingUser) {
             isUnique = true;
@@ -33,7 +34,7 @@ async function generateAnonymousId() {
  * Генерирует уникальный 8-символьный код для анонимной ссылки, проверяя его уникальность в БД.
  * @returns {Promise<string>} Уникальный код ссылки.
  */
-async function generateLinkCode() {
+async function generateLinkCode() { // Имя изменено с generateUniqueLinkCode на generateLinkCode
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let newCode;
     let isUnique = false;
@@ -42,14 +43,14 @@ async function generateLinkCode() {
         for (let i = 0; i < ANONYMOUS_LINK_CODE_LENGTH; i++) {
             newCode += chars.charAt(Math.floor(Math.random() * chars.length));
         }
-        const existingUser = await User.findOne({ linkCode: newCode });
+        // Проверяем уникальность в базе данных
+        const existingUser = await User.findOne({ anonLinkCode: newCode });
         if (!existingUser) {
             isUnique = true;
         }
     } while (!isUnique);
     return newCode;
 }
-
 
 /**
  * Возвращает текущую дату в формате YYYY-MM-DD.
@@ -77,7 +78,7 @@ function checkAutoBlock(messageText) {
 // Экспортируем все вспомогательные функции и константы
 module.exports = {
     generateAnonymousId,
-    generateLinkCode,
+    generateLinkCode, // Имя изменено
     getTodayDateString,
     checkAutoBlock,
     AUTO_BLOCK_DURATION_HOURS
