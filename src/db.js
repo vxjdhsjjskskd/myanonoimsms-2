@@ -7,32 +7,28 @@ const mongoose = require('mongoose');
  * @returns {Promise<void>} Промис, который разрешается при успешном подключении или отклоняется при ошибке.
  */
 async function connectDb() {
-    // Получаем URI подключения из переменной окружения
     const mongoUri = process.env.MONGODB_URI;
 
     if (!mongoUri) {
         console.error('Ошибка: Переменная окружения MONGODB_URI не установлена.');
         console.error('Пожалуйста, установите MONGODB_URI с URI вашей базы данных MongoDB Atlas.');
-        process.exit(1); // Завершаем процесс, если URI не найден
+        process.exit(1);
     }
 
     try {
         await mongoose.connect(mongoUri, {
             // useNewUrlParser и useUnifiedTopology больше не нужны в Mongoose 6+
             // и вызывают предупреждения. Их можно безопасно удалить.
-            // useNewUrlParser: true,
-            // useUnifiedTopology: true,
         });
         console.log('[DB] Успешно подключено к MongoDB Atlas!');
     } catch (error) {
         console.error('[DB] Ошибка подключения к MongoDB Atlas:', error);
-        process.exit(1); // Завершаем процесс при ошибке подключения к БД
+        process.exit(1);
     }
 }
 
 /**
  * Отключается от базы данных MongoDB.
- * Используется, например, при завершении работы приложения.
  * @returns {Promise<void>}
  */
 async function disconnectDb() {
