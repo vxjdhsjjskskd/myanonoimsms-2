@@ -1,6 +1,6 @@
-// src/anonChat.js - Модуль для логики анонимных вопросов/ответов (обновленный для MongoDB)
+// src/anonChat.js - Модуль для логики анонимных вопросов/ответов (обновленный для MongoDB - Упрощенная)
 
-const { getUserData, updateUserData } = require('./dataAccess'); // <--- ИЗМЕНЕНО: inMemoryDb -> dataAccess
+const { getUserData, updateUserData } = require('./dataAccess');
 const { checkAutoBlock, AUTO_BLOCK_DURATION_HOURS } = require('./utils');
 
 const MAX_MESSAGE_LENGTH = 500; // Максимальная длина сообщения
@@ -13,7 +13,7 @@ const MAX_MESSAGE_LENGTH = 500; // Максимальная длина сооб�
  * @returns {Promise<object>} Объект с результатом для отправителя и данными для владельца.
  */
 async function sendAnonymousMessage(senderChatId, ownerTelegramId, messageText) {
-    const ownerData = await getUserData(ownerTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    const ownerData = await getUserData(ownerTelegramId);
 
     if (!ownerData) {
         return { responseForSender: "❌ Владелец ссылки не найден или его аккаунт бота удален." };
@@ -29,8 +29,8 @@ async function sendAnonymousMessage(senderChatId, ownerTelegramId, messageText) 
     }
 
     // Сохраняем chat ID анонимного отправителя для возможности ответа
-    ownerData.lastAnonSenderChatId = String(senderChatId); // <--- ИЗМЕНЕНО: last_anon_sender_chat_id -> lastAnonSenderChatId, приводим к строке
-    await updateUserData(ownerTelegramId, ownerData); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    ownerData.lastAnonSenderChatId = String(senderChatId); // Приводим к строке
+    await updateUserData(ownerTelegramId, ownerData);
 
     return {
         responseForOwner: `📬 **Новое анонимное сообщение:**\n_${messageText}_\n\nЧтобы ответить, используйте команду \`/reply [ваш ответ]\`.`,
@@ -47,13 +47,13 @@ async function sendAnonymousMessage(senderChatId, ownerTelegramId, messageText) 
  * @returns {Promise<object>} Объект с результатом для владельца и данными для анонимного отправителя.
  */
 async function sendAnonymousReply(ownerTelegramId, replyText) {
-    const ownerData = await getUserData(ownerTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    const ownerData = await getUserData(ownerTelegramId);
 
     if (!ownerData) {
         return { responseForOwner: "Пожалуйста, сначала используйте команду /start для регистрации." };
     }
 
-    if (!ownerData.lastAnonSenderChatId) { // <--- ИЗМЕНЕНО: last_anon_sender_chat_id -> lastAnonSenderChatId
+    if (!ownerData.lastAnonSenderChatId) {
         return { responseForOwner: "❌ Нет недавних анонимных сообщений, на которые можно ответить. Возможно, вы еще не получали их или уже ответили." };
     }
 
@@ -63,20 +63,19 @@ async function sendAnonymousReply(ownerTelegramId, replyText) {
 
     // Проверка на автоблок для ответа
     if (checkAutoBlock(replyText)) {
-        // Если владелец ссылки нарушает правила, можно временно заблокировать его
-        ownerData.isAutoBlocked = true; // <--- ИЗМЕНЕНО: is_auto_blocked -> isAutoBlocked
-        ownerData.autoBlockUntil = new Date(Date.now() + AUTO_BLOCK_DURATION_HOURS * 60 * 60 * 1000); // <--- ИЗМЕНЕНО: auto_block_until -> autoBlockUntil, используем Date
-        await updateUserData(ownerTelegramId, ownerData); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        ownerData.isAutoBlocked = true;
+        ownerData.autoBlockUntil = new Date(Date.now() + AUTO_BLOCK_DURATION_HOURS * 60 * 60 * 1000);
+        await updateUserData(ownerTelegramId, ownerData);
         return {
             responseForOwner: `🚫 Ваш ответ содержит запрещенные слова. Вы автоматически заблокированы на ${AUTO_BLOCK_DURATION_HOURS} часов.\nОтвет не отправлен.`
         };
     }
 
-    const recipientChatId = ownerData.lastAnonSenderChatId; // <--- ИЗМЕНЕНО: last_anon_sender_chat_id -> lastAnonSenderChatId
+    const recipientChatId = ownerData.lastAnonSenderChatId;
 
     // Сбрасываем lastAnonSenderChatId после ответа, чтобы избежать повторных ответов на одно и то же сообщение
-    ownerData.lastAnonSenderChatId = null; // <--- ИЗМЕНЕНО: last_anon_sender_chat_id -> lastAnonSenderChatId
-    await updateUserData(ownerTelegramId, ownerData); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    ownerData.lastAnonSenderChatId = null;
+    await updateUserData(ownerTelegramId, ownerData);
 
     return {
         responseForOwner: `✅ Ваш ответ успешно отправлен анонимному пользователю.`,
