@@ -1,26 +1,13 @@
 {
-  "name": "anonymous-ask-bot-mongodb",
+  "name": "telegram-bot",
   "version": "1.0.0",
-  "description": "An anonymous Telegram Q&A bot with MongoDB Atlas persistent storage.",
-  "main": "app.js",
+  "description": "Telegram bot with MongoDB integration",
+  "main": "index.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node index.js"
   },
-  "keywords": [
-    "telegram",
-    "bot",
-    "anonymous",
-    "ask",
-    "qna",
-    "nodejs",
-    "mongodb",
-    "mongoose"
-  ],
-  "author": "Your Name",
-  "license": "ISC",
   "dependencies": {
-    "node-telegram-bot-api": "^0.66.0",
-    "express": "^4.19.2",
-    "mongoose": "^8.4.4"
+    "mongoose": "^6.0.0",
+    "telegraf": "^4.0.0"
   }
 }
