@@ -6,23 +6,20 @@ const { connectDb } = require('./src/db'); // Импорт функции под
 
 // Импорт модулей доступа к данным (теперь из dataAccess.js)
 const {
-    initializeDb, // Это будет заглушка, реальное подключение через src/db.js
     getUserData,
     updateUserData,
     getAnonLinkMap,
-    // setAnonLinkMapEntry, // <--- УДАЛИТЬ: не используется напрямую
-    // deleteAnonLinkMapEntry, // <--- УДАЛИТЬ: не используется напрямую
-    getAllUsers // Эта функция будет адаптирована
-} = require('./src/dataAccess'); // <--- ИЗМЕНЕНО: database -> dataAccess
+} = require('./src/dataAccess');
 
-const { generateAnonymousId, generateLinkCode } = require('./src/utils'); // generateLinkCode теперь асинхронна
+const { generateAnonymousId, generateLinkCode } = require('./src/utils');
 
 // Конфигурация
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const PORT = process.env.PORT || 10000; // Используем 10000 как запасной, если Render не предоставит свой
+// Render сам предоставляет PORT, используем его. Если нет, то 3000 как запасной.
+const PORT = process.env.PORT || 3000;
 
 if (!TOKEN) {
-    console.error('❌ Ошибка: TELEGRAM_BOT_TOKEN не найден в переменных окружения');
+    console.error('❌ Ошибка: TELEGRAM_BOT_TOKEN не найден в переменных окружения.');
     process.exit(1);
 }
 
@@ -199,13 +196,10 @@ async function initializeBotLogic() {
             return bot.sendMessage(chatId, 'Сначала используйте команду /start');
         }
 
-        // Удаляем старую ссылку и создаем новую
-        // deleteAnonLinkMapEntry(userData.linkCode); // <-- Эту функцию больше не используем напрямую
         const newLinkCode = await generateLinkCode(); // <-- Асинхронно
 
         userData.linkCode = newLinkCode;
         await updateUserData(chatId, userData); // <-- Асинхронно
-        // setAnonLinkMapEntry(newLinkCode, String(chatId)); // <-- Эту функцию больше не используем напрямую
 
         const newLinkText =
             `🔗 Ссылка успешно изменена!\n\n` +
@@ -242,8 +236,6 @@ async function initializeBotLogic() {
                 break;
 
             case 'send_more':
-                // lastTargetOwner не сохраняется в БД, поэтому его нужно получить из userData.targetOwner, если оно установлено
-                // или из lastAnonSenderChatId, если это был ответ
                 let targetOwnerForSendMore = userData.targetOwner || userData.lastAnonSenderChatId;
 
                 if (targetOwnerForSendMore) {
@@ -276,7 +268,6 @@ async function initializeBotLogic() {
                         userData.blockedUsers.push(userData.lastAnonSender);
                         await updateUserData(chatId, userData); // <-- Асинхронно
                     }
-                    // Обновляем клавиатуру, чтобы показать "Очистить черный список"
                     const newKeyboard = {
                         inline_keyboard: [
                             [{ text: '🗑️ Очистить черный список', callback_data: 'clear_blacklist' }]
@@ -297,7 +288,7 @@ async function initializeBotLogic() {
                 userData.blockedUsers = [];
                 await updateUserData(chatId, userData); // <-- Асинхронно
                 bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] }, // Удаляем инлайн-клавиатуру
+                    { inline_keyboard: [] },
                     {
                         chat_id: chatId,
                         message_id: message.message_id
@@ -313,14 +304,12 @@ async function initializeBotLogic() {
         const chatId = msg.chat.id;
 
         // Игнорируем команды
-        if (msg.text && (msg.text.startsWith('/') || msg.text === '')) { // Добавлена проверка на пустой текст
+        if (msg.text && (msg.text.startsWith('/') || msg.text === '')) {
             return;
         }
 
         const userData = await getUserData(chatId); // <-- Асинхронно
         if (!userData) {
-            // Если пользователь еще не зарегистрирован, но пытается что-то отправить,
-            // можно предложить ему /start
             return bot.sendMessage(chatId, 'Сначала используйте команду /start для регистрации.');
         }
 
@@ -330,13 +319,10 @@ async function initializeBotLogic() {
         }
 
         // Обработка ответа на анонимное сообщение (reply)
-        // Проверяем, что это ответ на сообщение бота (reply_to_message)
-        // И что у нас есть информация о последнем анонимном отправителе
         if (msg.reply_to_message && userData.lastAnonSenderChatId) {
             return handleReplyMessage(chatId, msg, userData);
         }
 
-        // Если это не команда, не часть пошагового процесса и не ответ
         bot.sendMessage(chatId, 'Я понимаю только команды. Используйте /start или команды из меню.');
     });
 
@@ -353,7 +339,7 @@ async function initializeBotLogic() {
         }
 
         // Проверка блокировки
-        if (ownerData.blockedUsers.includes(userData.anonymousId)) { // Используем blockedUsers из ownerData
+        if (ownerData.blockedUsers.includes(userData.anonymousId)) {
             userData.waitingFor = null;
             userData.targetOwner = null;
             await updateUserData(chatId, userData); // <-- Асинхронно
@@ -361,13 +347,11 @@ async function initializeBotLogic() {
         }
 
         // Сохраняем информацию для возможности ответа
-        ownerData.lastAnonSender = userData.anonymousId; // Анонимный ID отправителя
-        ownerData.lastAnonSenderChatId = String(chatId); // Chat ID отправителя
+        ownerData.lastAnonSender = userData.anonymousId;
+        ownerData.lastAnonSenderChatId = String(chatId);
         ownerData.messagesReceived = (ownerData.messagesReceived || 0) + 1;
         await updateUserData(ownerChatId, ownerData); // <-- Асинхронно
 
-        // Сохраняем для отправителя возможность написать еще
-        // userData.lastTargetOwner = ownerChatId; // Это поле не используется в схеме User
         userData.messagesSent = (userData.messagesSent || 0) + 1;
         userData.waitingFor = null;
         userData.targetOwner = null;
@@ -413,7 +397,6 @@ async function initializeBotLogic() {
             console.error('Ошибка отправки сообщения:', error);
         }
 
-        // Подтверждение отправителю
         const confirmKeyboard = {
             reply_markup: {
                 inline_keyboard: [
@@ -424,7 +407,6 @@ async function initializeBotLogic() {
 
         await bot.sendMessage(chatId, '🤿 Сообщение отправлено, ожидайте ответ!', confirmKeyboard);
 
-        // Отправляем рекламное сообщение
         const promoText =
             `🚀 Начни получать анонимные сообщения прямо сейчас!\n\n` +
             `Твоя ссылка:\n` +
@@ -442,12 +424,9 @@ async function initializeBotLogic() {
 
         const recipientChatId = userData.lastAnonSenderChatId;
 
-        // Пересылаем ответ анонимному отправителю
         try {
-            // Сначала цитируем оригинальное сообщение (упрощенно)
             await bot.sendMessage(recipientChatId, `💬 Ответ от владельца:`);
 
-            // Затем пересылаем ответ как есть
             if (msg.text) {
                 await bot.sendMessage(recipientChatId, msg.text);
             } else if (msg.photo) {
@@ -461,4 +440,37 @@ async function initializeBotLogic() {
             } else if (msg.voice) {
                 await bot.sendVoice(recipientChatId, msg.voice.file_id);
             } else if (msg.video_note) {
-                a
+                await bot.sendVideoNote(recipientChatId, msg.video_note.file_id);
+            } else if (msg.sticker) {
+                await bot.sendSticker(recipientChatId, msg.sticker.file_id);
+            }
+
+            const keyboard = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '📝 Написать ещё', callback_data: 'send_more' }]
+                    ]
+                }
+            };
+
+            await bot.sendMessage(recipientChatId, '💌 Получен ответ!', keyboard);
+
+            bot.sendMessage(chatId, '✅ Ответ отправлен!');
+
+        } catch (error) {
+            console.error('Ошибка отправки ответа:', error);
+            bot.sendMessage(chatId, '❌ Ошибка отправки ответа');
+        }
+    }
+}
+
+// Обработка ошибок
+bot.on('polling_error', (error) => {
+    console.error('❌ Ошибка polling:', error.message);
+});
+
+bot.on('error', (error) => {
+    console.error('❌ Ошибка бота:', error.message);
+});
+
+console.log('🚀 Бот запускается...');
