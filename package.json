@@ -1,7 +1,7 @@
 {
-  "name": "anonymous-ask-bot-in-memory",
+  "name": "anonymous-ask-bot-mongodb",
   "version": "1.0.0",
-  "description": "An anonymous Telegram Q&A bot with in-memory data storage for testing.",
+  "description": "An anonymous Telegram Q&A bot with MongoDB Atlas persistent storage.",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
@@ -13,12 +13,14 @@
     "ask",
     "qna",
     "nodejs",
-    "in-memory"
+    "mongodb",
+    "mongoose"
   ],
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
-    "express": "^5.1.0",
-    "node-telegram-bot-api": "^0.66.0"
+    "express": "^4.19.2",       // Обновлено до актуальной версии Express
+    "node-telegram-bot-api": "^0.66.0",
+    "mongoose": "^8.4.4"        // <--- НОВАЯ ЗАВИСИМОСТЬ
   }
 }
