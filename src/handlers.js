@@ -1,22 +1,27 @@
-// src/handlers.js - Модуль для обработки команд бота (обновленный для AnonAskBot)
+// src/handlers.js - Модуль для обработки команд бота (обновленный для AnonAskBot и MongoDB)
 
+// Импортируем функции доступа к данным из dataAccess.js (они будут асинхронными)
 const {
     getUserData,
     getTelegramIdByAnonymousId,
     getTelegramIdByAnonLinkCode,
-    getUsers,
-    getMessages,
-    getBlocks,
+    getAnonLinkMap,
     updateUserData,
-    updateBlocksData,
-    getAnonIdMap,
-    getAnonLinkMap
-} = require('./inMemoryDb');
+    // getBlocks, // Не используется напрямую, т.к. блокировки в User модели
+    // updateBlocksData, // Не используется напрямую, т.к. блокировки в User модели
+    // getMessages, // Заглушка, т.к. сообщения не хранятся в БД
+    // getUsers, // Не используется напрямую
+    // getAnonIdMap // Не используется напрямую
+} = require('./dataAccess'); // <--- ИЗМЕНЕНО: inMemoryDb -> dataAccess
 
+// Импортируем функции из user.js (они тоже станут асинхронными)
 const { registerUser, updateMessageCount, changeAnonymousId, changeAnonymousLink } = require('./user');
+// Импортируем функции из chat.js (они тоже станут асинхронными)
 const { recordMessage, getRecentMessages } = require('./chat');
+// Импортируем функции из anonChat.js (они тоже станут асинхронными)
 const { sendAnonymousMessage, sendAnonymousReply } = require('./anonChat');
-const { generateAnonymousId, getTodayDateString, isBlocked, checkAutoBlock, AUTO_BLOCK_DURATION_HOURS } = require('./utils');
+// Импортируем функции из utils.js (они тоже станут асинхронными)
+const { generateAnonymousId, getTodayDateString, checkAutoBlock, AUTO_BLOCK_DURATION_HOURS } = require('./utils');
 
 // --- Константы, используемые в обработчиках ---
 const MAX_MESSAGES_PER_DAY = 20; // Не используется для анонимных вопросов, но оставим для других функций
@@ -37,32 +42,35 @@ async function handleStart(telegramId, startPayload, botUsername) {
 
     // Если есть startPayload, это, вероятно, кто-то перешел по анонимной ссылке
     if (startPayload) {
-        const ownerTelegramId = getTelegramIdByAnonLinkCode(startPayload);
+        // Получаем linkMap асинхронно
+        const linkMap = await getAnonLinkMap();
+        const ownerTelegramId = linkMap[startPayload.toUpperCase()];
+
         if (ownerTelegramId && ownerTelegramId !== telegramIdStr) {
             // Это анонимный отправитель, который пришел по ссылке
-            const senderData = getUserData(telegramIdStr);
+            let senderData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
             if (!senderData) {
                 // Если анонимный отправитель не зарегистрирован, зарегистрируем его
-                await registerUser(telegramIdStr);
+                senderData = await registerUser(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
             }
             // Устанавливаем состояние для анонимной отправки
-            const userData = getUserData(telegramIdStr);
-            userData.current_command_step = 'awaiting_anon_message';
-            userData.temp_data = { owner_telegram_id: ownerTelegramId };
-            updateUserData(telegramIdStr, userData);
+            senderData.currentCommandStep = 'awaiting_anon_message'; // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+            senderData.tempData = { owner_telegram_id: ownerTelegramId }; // <--- ИЗМЕНЕНО: temp_data -> tempData
+            await updateUserData(telegramIdStr, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
             return `Вы собираетесь отправить анонимное сообщение владельцу этой ссылки. Введите ваше сообщение:`;
         } else if (ownerTelegramId === telegramIdStr) {
             // Пользователь перешел по своей собственной ссылке
+            const userData = await getUserData(telegramIdStr); // Получаем данные пользователя
             return `Привет! Это ваша собственная анонимная ссылка. Вы не можете отправить анонимное сообщение самому себе.\n\n` +
-                   `Ваша ссылка для анонимных вопросов: \`https://t.me/${botUsername}?start=${startPayload}\``;
+                   `Ваша ссылка для анонимных вопросов: \`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
         }
     }
 
     // Если нет payload или payload недействителен, или это владелец ссылки
-    const userData = await registerUser(telegramIdStr);
-    const formattedAnonId = `\`${userData.anonymous_id}\``;
-    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anon_link_code}\``;
+    const userData = await registerUser(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    const formattedAnonId = `\`${userData.anonymousId}\``; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
 
     return (
         `🎉 Добро пожаловать в Анонимную почту! Ваш уникальный ID: ${formattedAnonId}\n\n` +
@@ -91,11 +99,11 @@ async function handleStart(telegramId, startPayload, botUsername) {
  * @returns {Promise<string>} Сообщение для отправки пользователю.
  */
 async function handleMyLink(telegramId, botUsername) {
-    const userData = getUserData(telegramId);
+    const userData = await getUserData(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
-    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anon_link_code}\``;
+    const formattedAnonLink = `\`https://t.me/${botUsername}?start=${userData.anonLinkCode}\``; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
     return `Ваша личная ссылка для анонимных вопросов: ${formattedAnonLink}`;
 }
 
@@ -105,11 +113,11 @@ async function handleMyLink(telegramId, botUsername) {
  * @returns {Promise<string>} Сообщение для отправки пользователю.
  */
 async function handleMyId(telegramId) {
-    const userData = getUserData(telegramId);
+    const userData = await getUserData(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
-    const formattedAnonId = `\`${userData.anonymous_id}\``;
+    const formattedAnonId = `\`${userData.anonymousId}\``; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
     return `Ваш анонимный ID: ${formattedAnonId}`;
 }
 
@@ -119,14 +127,14 @@ async function handleMyId(telegramId) {
  * @returns {Promise<string>} Сообщение для отправки отправителю.
  */
 async function initiateSendMessage(senderTelegramId) {
-    const senderData = getUserData(senderTelegramId);
+    const senderData = await getUserData(senderTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!senderData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
     // Сбрасываем текущее состояние, если оно было
-    senderData.current_command_step = 'awaiting_recipient_id';
-    senderData.temp_data = {};
-    updateUserData(senderTelegramId, senderData);
+    senderData.currentCommandStep = 'awaiting_recipient_id'; // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+    senderData.tempData = {}; // <--- ИЗМЕНЕНО: temp_data -> tempData
+    await updateUserData(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
     return "Введите ID получателя:";
 }
 
@@ -139,25 +147,25 @@ async function initiateSendMessage(senderTelegramId) {
  * @returns {Promise<object>} Объект с результатом отправки.
  */
 async function handleSendMessageStep(senderTelegramId, messageText, directRecipientId = undefined, directMessageText = undefined) {
-    const senderData = getUserData(senderTelegramId);
+    const senderData = await getUserData(senderTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!senderData) {
         return { responseForSender: "Пожалуйста, сначала используйте команду /start для регистрации." };
     }
 
-    const senderAnonId = senderData.anonymous_id;
+    const senderAnonId = senderData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
 
     // Проверка на автоблок отправителя
-    if (senderData.is_auto_blocked) {
-        const blockUntil = new Date(senderData.auto_block_until);
+    if (senderData.isAutoBlocked) { // <--- ИЗМЕНЕНО: is_auto_blocked -> isAutoBlocked
+        const blockUntil = new Date(senderData.autoBlockUntil); // <--- ИЗМЕНЕНО: auto_block_until -> autoBlockUntil
         if (new Date() < blockUntil) {
             const remainingTimeMs = blockUntil.getTime() - new Date().getTime();
             const hours = Math.floor(remainingTimeMs / (1000 * 60 * 60));
             const minutes = Math.floor((remainingTimeMs % (1000 * 60 * 60)) / (1000 * 60));
             return { responseForSender: `🚫 Вы временно заблокированы за нарушение правил. Блокировка истекает через ${hours} ч ${minutes} мин.` };
         } else {
-            senderData.is_auto_blocked = false;
-            senderData.auto_block_until = null;
-            updateUserData(senderTelegramId, senderData);
+            senderData.isAutoBlocked = false; // <--- ИЗМЕНЕНО: is_auto_blocked -> isAutoBlocked
+            senderData.autoBlockUntil = null; // <--- ИЗМЕНЕНО: auto_block_until -> autoBlockUntil
+            await updateUserData(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
         }
     }
 
@@ -169,22 +177,22 @@ async function handleSendMessageStep(senderTelegramId, messageText, directRecipi
         recipientAnonId = directRecipientId.toUpperCase();
         finalMessageText = directMessageText;
         // Сбрасываем состояние, так как это прямая команда
-        senderData.current_command_step = null;
-        senderData.temp_data = {};
-        updateUserData(senderTelegramId, senderData);
-    } else if (senderData.current_command_step === 'awaiting_recipient_id') {
+        senderData.currentCommandStep = null; // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+        senderData.tempData = {}; // <--- ИЗМЕНЕНО: temp_data -> tempData
+        await updateUserData(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    } else if (senderData.currentCommandStep === 'awaiting_recipient_id') { // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
         recipientAnonId = messageText.toUpperCase();
-        senderData.temp_data.recipient_id = recipientAnonId;
-        senderData.current_command_step = 'awaiting_message_text';
-        updateUserData(senderTelegramId, senderData);
+        senderData.tempData.recipient_id = recipientAnonId; // <--- ИЗМЕНЕНО: temp_data -> tempData
+        senderData.currentCommandStep = 'awaiting_message_text'; // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+        await updateUserData(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
         return { responseForSender: `ID получателя установлен: **${recipientAnonId}**. Теперь введите текст сообщения:` };
-    } else if (senderData.current_command_step === 'awaiting_message_text') {
-        recipientAnonId = senderData.temp_data.recipient_id;
+    } else if (senderData.currentCommandStep === 'awaiting_message_text') { // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+        recipientAnonId = senderData.tempData.recipient_id; // <--- ИЗМЕНЕНО: temp_data -> tempData
         finalMessageText = messageText;
         // Сброс состояния после получения текста
-        senderData.current_command_step = null;
-        senderData.temp_data = {};
-        updateUserData(senderTelegramId, senderData);
+        senderData.currentCommandStep = null; // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
+        senderData.tempData = {}; // <--- ИЗМЕНЕНО: temp_data -> tempData
+        await updateUserData(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
     } else {
         // Неизвестное состояние или неверное использование
         return { responseForSender: "Неизвестное состояние команды. Пожалуйста, попробуйте снова или используйте /help." };
@@ -196,15 +204,15 @@ async function handleSendMessageStep(senderTelegramId, messageText, directRecipi
     }
 
     if (checkAutoBlock(finalMessageText)) {
-        senderData.is_auto_blocked = true;
-        senderData.auto_block_until = new Date(Date.now() + AUTO_BLOCK_DURATION_HOURS * 60 * 60 * 1000).toISOString();
-        updateUserData(senderTelegramId, senderData);
+        senderData.isAutoBlocked = true; // <--- ИЗМЕНЕНО: is_auto_blocked -> isAutoBlocked
+        senderData.autoBlockUntil = new Date(Date.now() + AUTO_BLOCK_DURATION_HOURS * 60 * 60 * 1000); // <--- ИЗМЕНЕНО: auto_block_until -> autoBlockUntil, используем Date
+        await updateUserData(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
         return {
             responseForSender: `🚫 Ваше сообщение содержит запрещенные слова. Вы автоматически заблокированы на ${AUTO_BLOCK_DURATION_HOURS} часов.\nСообщение не отправлено.`
         };
     }
 
-    const recipientTelegramId = getTelegramIdByAnonymousId(recipientAnonId);
+    const recipientTelegramId = await getTelegramIdByAnonymousId(recipientAnonId); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
     if (!recipientTelegramId) {
         return { responseForSender: "❌ Пользователь с таким ID не найден." };
@@ -213,27 +221,28 @@ async function handleSendMessageStep(senderTelegramId, messageText, directRecipi
         return { responseForSender: "Вы не можете отправить сообщение самому себе." };
     }
 
-    const recipientData = getUserData(recipientTelegramId);
+    const recipientData = await getUserData(recipientTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!recipientData) {
         return { responseForSender: "❌ Ошибка: данные получателя не найдены." };
     }
 
-    if (isBlocked(recipientAnonId, senderAnonId)) {
+    // Проверка блокировки: isBlocked теперь должна быть асинхронной и принимать данные из БД
+    if (recipientData.blockedUsers.includes(senderAnonId)) { // <--- ИЗМЕНЕНО: используем recipientData.blockedUsers
         return { responseForSender: "❌ Вы не можете отправить сообщение этому пользователю, так как он вас заблокировал." };
     }
-    if (isBlocked(senderAnonId, recipientAnonId)) {
+    if (senderData.blockedUsers.includes(recipientAnonId)) { // <--- ИЗМЕНЕНО: используем senderData.blockedUsers
         return { responseForSender: "❌ Вы заблокировали этого пользователя и не можете ему отправлять сообщения." };
     }
 
-    updateMessageCount(senderTelegramId, senderData);
-    if (senderData.messages_sent_today > MAX_MESSAGES_PER_DAY) {
+    await updateMessageCount(senderTelegramId, senderData); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    if (senderData.messagesSentToday > MAX_MESSAGES_PER_DAY) { // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
         return { responseForSender: `🚫 Вы достигли лимита в ${MAX_MESSAGES_PER_DAY} сообщений в день. Попробуйте завтра.` };
     }
 
     // recordMessage(senderAnonId, recipientAnonId, finalMessageText); // Не используем для этого типа сообщений
 
     return {
-        responseForSender: `✅ Сообщение успешно отправлено пользователю **${recipientAnonId}**.\nОтправлено сегодня: ${senderData.messages_sent_today}/${MAX_MESSAGES_PER_DAY}`,
+        responseForSender: `✅ Сообщение успешно отправлено пользователю **${recipientAnonId}**.\nОтправлено сегодня: ${senderData.messagesSentToday}/${MAX_MESSAGES_PER_DAY}`, // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
         recipientTelegramId: recipientTelegramId,
         senderAnonId: senderAnonId,
         messageText: finalMessageText
@@ -252,7 +261,7 @@ async function handleReply(ownerTelegramId, args) {
     if (!replyText) {
         return { responseForOwner: "Использование: `/reply [ваш ответ]`" };
     }
-    const result = await sendAnonymousReply(ownerTelegramId, replyText);
+    const result = await sendAnonymousReply(ownerTelegramId, replyText); // <--- АСИНХРОННЫЙ ВЫЗОВ
     return result;
 }
 
@@ -263,14 +272,15 @@ async function handleReply(ownerTelegramId, args) {
  * @returns {Promise<string>} Сообщение со списком входящих сообщений.
  */
 async function handleInbox(telegramId) {
-    const userData = getUserData(telegramId);
+    const userData = await getUserData(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
 
-    const userAnonId = userData.anonymous_id;
-    const receivedMessages = getMessages().filter(msg => msg.recipient_anon_id === userAnonId); // Пока используем старые сообщения
-    receivedMessages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    const userAnonId = userData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+    // getMessages() теперь заглушка, т.к. сообщения не хранятся в БД для inbox
+    // Если вы хотите хранить сообщения, нужно будет реализовать это в dataAccess.js и models.js
+    const receivedMessages = getRecentMessages(userAnonId); // Вызываем заглушку, которая вернет []
 
     if (receivedMessages.length === 0) {
         return "📬 У вас пока нет новых сообщений.";
@@ -297,8 +307,7 @@ async function handleInbox(telegramId) {
  * @returns {Promise<string>} Сообщение для отправки блокирующему пользователю.
  */
 async function handleBlock(blockerTelegramId, args) {
-    const blockerData = getUserData(blockerTelegramId);
-    const blocks = getBlocks();
+    const blockerData = await getUserData(blockerTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!blockerData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
@@ -307,26 +316,25 @@ async function handleBlock(blockerTelegramId, args) {
         return "Использование: `/block [ID пользователя для блокировки]`";
     }
 
-    const blockerAnonId = blockerData.anonymous_id;
+    const blockerAnonId = blockerData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
     const blockedAnonId = args[0].toUpperCase();
 
-    if (!getTelegramIdByAnonymousId(blockedAnonId)) {
+    // Проверяем, существует ли пользователь, которого пытаются заблокировать
+    const targetUserTelegramId = await getTelegramIdByAnonymousId(blockedAnonId); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    if (!targetUserTelegramId) {
         return "❌ Пользователь с таким ID не найден.";
     }
     if (blockedAnonId === blockerAnonId) {
         return "Вы не можете заблокировать самого себя.";
     }
 
-    if (!blocks[blockerAnonId]) {
-        blocks[blockerAnonId] = [];
-    }
-
-    if (blocks[blockerAnonId].includes(blockedAnonId)) {
+    // Логика блокировки теперь в blockedUsers внутри User модели
+    if (blockerData.blockedUsers.includes(blockedAnonId)) {
         return `🚫 Пользователь **${blockedAnonId}** уже заблокирован.`;
     }
 
-    blocks[blockerAnonId].push(blockedAnonId);
-    updateBlocksData(blockerAnonId, blocks[blockerAnonId]);
+    blockerData.blockedUsers.push(blockedAnonId);
+    await updateUserData(blockerTelegramId, blockerData); // <--- АСИНХРОННЫЙ ВЫЗОВ
     return `✅ Пользователь **${blockedAnonId}** успешно заблокирован. Он больше не сможет отправлять вам сообщения.`;
 }
 
@@ -337,8 +345,7 @@ async function handleBlock(blockerTelegramId, args) {
  * @returns {Promise<string>} Сообщение для отправки разблокирующему пользователю.
  */
 async function handleUnblock(unblockerTelegramId, args) {
-    const unblockerData = getUserData(unblockerTelegramId);
-    const blocks = getBlocks();
+    const unblockerData = await getUserData(unblockerTelegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!unblockerData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
@@ -347,15 +354,15 @@ async function handleUnblock(unblockerTelegramId, args) {
         return "Использование: `/unblock [ID пользователя для разблокировки]`";
     }
 
-    const unblockerAnonId = unblockerData.anonymous_id;
+    const unblockerAnonId = unblockerData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
     const unblockedAnonId = args[0].toUpperCase();
 
-    if (!blocks[unblockerAnonId] || !blocks[unblockerAnonId].includes(unblockedAnonId)) {
+    if (!unblockerData.blockedUsers.includes(unblockedAnonId)) {
         return `🚫 Пользователь **${unblockedAnonId}** не найден в вашем списке заблокированных.`;
     }
 
-    blocks[unblockerAnonId] = blocks[unblockerAnonId].filter(id => id !== unblockedAnonId);
-    updateBlocksData(unblockerAnonId, blocks[unblockerAnonId]);
+    unblockerData.blockedUsers = unblockerData.blockedUsers.filter(id => id !== unblockedAnonId);
+    await updateUserData(unblockerTelegramId, unblockerData); // <--- АСИНХРОННЫЙ ВЫЗОВ
     return `✅ Пользователь **${unblockedAnonId}** успешно разблокирован.`;
 }
 
@@ -365,14 +372,12 @@ async function handleUnblock(unblockerTelegramId, args) {
  * @returns {Promise<string>} Сообщение со списком заблокированных пользователей.
  */
 async function handleBlocked(telegramId) {
-    const userData = getUserData(telegramId);
-    const blocks = getBlocks();
+        const userData = await getUserData(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
 
-    const userAnonId = userData.anonymous_id;
-    const blockedList = blocks[userAnonId] || [];
+    const blockedList = userData.blockedUsers || []; // <--- ИЗМЕНЕНО: используем blockedUsers из userData
 
     if (blockedList.length === 0) {
         return "✅ Ваш список заблокированных пользователей пуст.";
@@ -391,13 +396,13 @@ async function handleBlocked(telegramId) {
  * @returns {Promise<string>} Сообщение для отправки пользователю.
  */
 async function handleChangeId(telegramId) {
-    const userData = getUserData(telegramId);
+    const userData = await getUserData(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
 
-    const oldAnonId = userData.anonymous_id;
-    const newAnonId = await changeAnonymousId(telegramId);
+    const oldAnonId = userData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+    const newAnonId = await changeAnonymousId(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
     const formattedNewAnonId = `\`${newAnonId}\``;
 
@@ -411,13 +416,13 @@ async function handleChangeId(telegramId) {
  * @returns {Promise<string>} Сообщение для отправки пользователю.
  */
 async function handleChangeLink(telegramId, botUsername) {
-    const userData = getUserData(telegramId);
+    const userData = await getUserData(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
         return "Пожалуйста, сначала используйте команду /start для регистрации.";
     }
 
-    const oldAnonLinkCode = userData.anon_link_code;
-    const newAnonLinkCode = await changeAnonymousLink(telegramId);
+    const oldAnonLinkCode = userData.anonLinkCode; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
+    const newAnonLinkCode = await changeAnonymousLink(telegramId); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
     const formattedNewAnonLink = `\`https://t.me/${botUsername}?start=${newAnonLinkCode}\``;
 
@@ -452,35 +457,30 @@ function handleHelp() {
 /**
  * Общий обработчик текстовых сообщений, который управляет состоянием команд.
  * @param {string|number} chatId - ID чата пользователя.
+ *
  * @param {string} messageText - Текст сообщения пользователя.
- * @returns {Promise<object|null>} Результат обработки сообщения или null, если это обычное сообщение.
+ * @returns {Promise<object|null>} Объект с результатом для отправителя/получателя или null, если сообщение не обработано.
  */
 async function handleUserTextMessage(chatId, messageText) {
-    const userData = getUserData(chatId);
+    const userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
     if (!userData) {
-        return null;
+        // Пользователь не зарегистрирован, не можем обработать текстовое сообщение
+        return null; // Или можно вернуть сообщение "Пожалуйста, используйте /start"
     }
 
-    // Обработка пошаговой отправки сообщения
-    if (userData.current_command_step === 'awaiting_recipient_id' || userData.current_command_step === 'awaiting_message_text') {
-        return await handleSendMessageStep(chatId, messageText);
-    }
-
-    // Обработка анонимного сообщения
-    if (userData.current_command_step === 'awaiting_anon_message') {
-        const ownerTelegramId = userData.temp_data.owner_telegram_id;
-        // Сброс состояния
-        userData.current_command_step = null;
-        userData.temp_data = {};
-        updateUserData(chatId, userData);
-        
-        const result = await sendAnonymousMessage(chatId, ownerTelegramId, messageText);
+    // Проверяем, находится ли пользователь в середине пошаговой команды
+    if (userData.currentCommandStep === 'awaiting_recipient_id' || userData.currentCommandStep === 'awaiting_message_text') {
+        const result = await handleSendMessageStep(chatId, messageText); // <--- АСИНХРОННЫЙ ВЫЗОВ
         return result;
     }
 
-    // Если нет активной команды, возвращаем null
+    // Если это не часть пошаговой команды, и не команда, и не кнопка,
+    // то это анонимное сообщение, пришедшее по ссылке.
+    // Эту логику мы перенесли в app.js, когда обрабатываем /start с payload.
+    // Здесь эта функция будет возвращать null, если сообщение не является частью пошаговой команды.
     return null;
 }
+
 
 module.exports = {
     handleStart,
