@@ -230,29 +230,23 @@ async function initializeBotLogic() {
 
         if (userData.currentCommandStep === 'awaiting_anon_message') {
             // Пользователь перешел по анонимной ссылке и ждет сообщения
-            result = await sendAnonymousMessage(chatId, userData.tempData.owner_telegram_id, messageText);
-            // После отправки анонимного сообщения, сбрасываем состояние
-            userData.currentCommandStep = null;
-            userData.tempData = {};
-            await updateUserData(chatId, userData);
-
+            result = await handleUserTextMessage(chatId, messageText); // Используем handleUserTextMessage
+            // Состояние сбрасывается внутри handleUserTextMessage
         } else if (msg.reply_to_message && userData.lastAnonSenderChatId) {
             // Если это ответ на анонимное сообщение (через свайп)
             result = await handleReply(chatId, [messageText]);
-
         } else {
             // Если это обычное текстовое сообщение, которое не является частью пошаговой команды
             bot.sendMessage(chatId, 'Я понимаю только команды или кнопки. Используйте /help для справки.', { parse_mode: 'Markdown' });
             return;
         }
 
-
         if (result) {
             // Обработка результата отправки анонимного сообщения
             if (result.ownerTelegramId && result.senderChatId && result.messageText) {
                 // Это новое анонимное сообщение, отправляем владельцу ссылки
                 const ownerData = await getUserData(result.ownerTelegramId); // Получаем данные владельца для блокировок
-                if (ownerData.blockedUsers.includes(result.senderChatId)) {
+                if (ownerData && ownerData.blockedUsers.includes(result.senderChatId)) {
                     // Если отправитель заблокирован владельцем, не отправляем сообщение
                     bot.sendMessage(result.senderChatId, `🚫 Ваше сообщение не может быть доставлено, так как вы заблокированы получателем.`);
                     return;
@@ -268,9 +262,7 @@ async function initializeBotLogic() {
                 });
                 // Сохраняем lastAnonSenderChatId для владельца ссылки
                 ownerData.lastAnonSenderChatId = String(result.senderChatId);
-                // lastAnonSender теперь будет хранить Chat ID отправителя для кнопки "Заблокировать"
-                ownerData.lastAnonSender = String(result.senderChatId);
-                await updateUserData(result.ownerTelegramId, ownerData);
+                await updateUserData(result.ownerTelegramId, ownerData); // Обновляем данные владельца
 
                 // Отправляем отправителю подтверждение и его ссылку
                 bot.sendMessage(result.senderChatId, '🏄‍♂️ Сообщение отправлено, ожидайте ответ!', {
@@ -327,7 +319,7 @@ async function initializeBotLogic() {
                 userData.blockedUsers.push(blockedChatId);
                 await updateUserData(chatId, userData);
             }
-            // Обновляем кнопку на "Разблокировать" или "Очистить черный список"
+            // Обновляем кнопку на "Очистить черный список"
             bot.editMessageReplyMarkup(
                 {
                     inline_keyboard: [
@@ -416,4 +408,4 @@ bot.on('error', (error) => {
 });
 
 console.log('🚀 Бот запускается...');
-                                                  
+                
