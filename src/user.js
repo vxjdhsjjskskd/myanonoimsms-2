@@ -78,7 +78,7 @@ async function changeAnonymousLink(telegramId) {
         userData = await registerUser(telegramIdStr); // АСИНХРОННЫЙ ВЫЗОВ
     }
 
-    const oldAnonLinkCode = userData.anonLinkCode;
+    const oldAnonLinkCode = userData.anonLinkCode || userData.linkCode; // Учитываем старое поле
     console.log(`[User.changeAnonymousLink] Старый anonLinkCode: ${oldAnonLinkCode}`);
     const newAnonLinkCode = await generateLinkCode(); // АСИНХРОННЫЙ ВЫЗОВ
     if (!newAnonLinkCode) {
@@ -88,6 +88,10 @@ async function changeAnonymousLink(telegramId) {
     console.log(`[User.changeAnonymousLink] Новый anonLinkCode: ${newAnonLinkCode}`);
 
     userData.anonLinkCode = newAnonLinkCode;
+    // Если есть старое поле linkCode, можно его удалить или обнулить, чтобы не было дублирования
+    if (userData.linkCode) {
+        userData.linkCode = undefined; // Удаляем поле из объекта перед сохранением
+    }
     await updateUserData(telegramIdStr, userData); // АСИНХРОННЫЙ ВЫЗОВ
 
     console.log(`[User.changeAnonymousLink] Анонимная ссылка пользователя ${telegramIdStr} изменена с ${oldAnonLinkCode} на ${newAnonLinkCode}`);
