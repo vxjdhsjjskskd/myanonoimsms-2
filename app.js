@@ -4,7 +4,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const { connectDb } = require('./src/db'); // Импорт функции подключения к БД
 
-// Импорт модулей доступа к данным (теперь из dataAccess.js)
+// Импорт модулей доступа к данным
 const {
     getUserData,
     updateUserData,
@@ -474,3 +474,4 @@ bot.on('error', (error) => {
 });
 
 console.log('🚀 Бот запускается...');
+                    
