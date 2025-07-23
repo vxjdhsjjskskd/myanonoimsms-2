@@ -4,19 +4,21 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const { connectDb } = require('./src/db'); // Импорт функции подключения к БД
 
-// Импорт модулей доступа к данным
+// Импорт модулей доступа к данным (теперь из dataAccess.js)
+// Важно: все эти функции теперь асинхронны!
 const {
     getUserData,
     updateUserData,
     getAnonLinkMap,
 } = require('./src/dataAccess');
 
+// generateAnonymousId и generateLinkCode теперь асинхронны
 const { generateAnonymousId, generateLinkCode } = require('./src/utils');
 
 // Конфигурация
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 // Render сам предоставляет PORT, используем его. Если нет, то 3000 как запасной.
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; // Используйте 10000 если Render постоянно назначает его
 
 if (!TOKEN) {
     console.error('❌ Ошибка: TELEGRAM_BOT_TOKEN не найден в переменных окружения.');
@@ -81,17 +83,17 @@ async function initializeBotLogic() {
 
         // Если есть payload - это переход по анонимной ссылке
         if (startPayload) {
-            const linkMap = await getAnonLinkMap(); // <-- Асинхронно
+            const linkMap = await getAnonLinkMap(); // <--- АСИНХРОННЫЙ ВЫЗОВ
             const ownerChatId = linkMap[startPayload.toUpperCase()];
 
             if (ownerChatId && ownerChatId !== String(chatId)) {
                 // Анонимный отправитель
-                let userData = await getUserData(chatId); // <-- Асинхронно
+                let userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
                 if (!userData) {
                     userData = {
                         chatId: String(chatId),
-                        anonymousId: await generateAnonymousId(), // <-- Асинхронно
-                        linkCode: await generateLinkCode(), // <-- Асинхронно
+                        anonymousId: await generateAnonymousId(), // <--- АСИНХРОННЫЙ ВЫЗОВ
+                        linkCode: await generateLinkCode(), // <--- АСИНХРОННЫЙ ВЫЗОВ
                         blockedUsers: [],
                         registeredAt: new Date(), // Используем Date объект
                         messagesReceived: 0,
@@ -101,13 +103,13 @@ async function initializeBotLogic() {
                         lastAnonSender: null,
                         lastAnonSenderChatId: null
                     };
-                    await updateUserData(chatId, userData); // <-- Асинхронно
+                    await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
                 }
 
                 // Устанавливаем состояние для анонимного сообщения
                 userData.waitingFor = 'anon_message';
                 userData.targetOwner = ownerChatId;
-                await updateUserData(chatId, userData); // <-- Асинхронно
+                await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
                 const keyboard = {
                     reply_markup: {
@@ -140,12 +142,12 @@ async function initializeBotLogic() {
 
     // Функция обработки команды /start
     async function handleStartCommand(chatId) {
-        let userData = await getUserData(chatId); // <-- Асинхронно
+        let userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
         if (!userData) {
             userData = {
                 chatId: String(chatId),
-                anonymousId: await generateAnonymousId(), // <-- Асинхронно
-                linkCode: await generateLinkCode(), // <-- Асинхронно
+                anonymousId: await generateAnonymousId(), // <--- АСИНХРОННЫЙ ВЫЗОВ
+                linkCode: await generateLinkCode(), // <--- АСИНХРОННЫЙ ВЫЗОВ
                 blockedUsers: [],
                 registeredAt: new Date(), // Используем Date объект
                 messagesReceived: 0,
@@ -155,7 +157,7 @@ async function initializeBotLogic() {
                 lastAnonSender: null,
                 lastAnonSenderChatId: null
             };
-            await updateUserData(chatId, userData); // <-- Асинхронно
+            await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
             console.log(`✅ Новый пользователь: ${chatId}`);
         }
 
@@ -171,7 +173,7 @@ async function initializeBotLogic() {
     // Обработчик команды /stats
     bot.onText(/\/stats/, async (msg) => {
         const chatId = msg.chat.id;
-        const userData = await getUserData(chatId); // <-- Асинхронно
+        const userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         if (!userData) {
             return bot.sendMessage(chatId, 'Сначала используйте команду /start');
@@ -190,16 +192,16 @@ async function initializeBotLogic() {
     // Обработчик команды /changelink
     bot.onText(/\/changelink/, async (msg) => {
         const chatId = msg.chat.id;
-        const userData = await getUserData(chatId); // <-- Асинхронно
+        const userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         if (!userData) {
             return bot.sendMessage(chatId, 'Сначала используйте команду /start');
         }
 
-        const newLinkCode = await generateLinkCode(); // <-- Асинхронно
+        const newLinkCode = await generateLinkCode(); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         userData.linkCode = newLinkCode;
-        await updateUserData(chatId, userData); // <-- Асинхронно
+        await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         const newLinkText =
             `🔗 Ссылка успешно изменена!\n\n` +
@@ -218,14 +220,14 @@ async function initializeBotLogic() {
 
         await bot.answerCallbackQuery(callbackQuery.id);
 
-        const userData = await getUserData(chatId); // <-- Асинхронно
+        const userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
         if (!userData) return;
 
         switch (data) {
             case 'cancel_message':
                 userData.waitingFor = null;
                 userData.targetOwner = null;
-                await updateUserData(chatId, userData); // <-- Асинхронно
+                await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
                 bot.editMessageText(
                     '❌ Отправка сообщения отменена.',
                     {
@@ -241,7 +243,7 @@ async function initializeBotLogic() {
                 if (targetOwnerForSendMore) {
                     userData.waitingFor = 'anon_message';
                     userData.targetOwner = targetOwnerForSendMore; // Устанавливаем обратно
-                    await updateUserData(chatId, userData); // <-- Асинхронно
+                    await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
                     const keyboard = {
                         reply_markup: {
@@ -266,7 +268,7 @@ async function initializeBotLogic() {
                 if (userData.lastAnonSender) {
                     if (!userData.blockedUsers.includes(userData.lastAnonSender)) {
                         userData.blockedUsers.push(userData.lastAnonSender);
-                        await updateUserData(chatId, userData); // <-- Асинхронно
+                        await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
                     }
                     const newKeyboard = {
                         inline_keyboard: [
@@ -286,7 +288,7 @@ async function initializeBotLogic() {
 
             case 'clear_blacklist':
                 userData.blockedUsers = [];
-                await updateUserData(chatId, userData); // <-- Асинхронно
+                await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
                 bot.editMessageReplyMarkup(
                     { inline_keyboard: [] },
                     {
@@ -308,7 +310,7 @@ async function initializeBotLogic() {
             return;
         }
 
-        const userData = await getUserData(chatId); // <-- Асинхронно
+        const userData = await getUserData(chatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
         if (!userData) {
             return bot.sendMessage(chatId, 'Сначала используйте команду /start для регистрации.');
         }
@@ -329,12 +331,12 @@ async function initializeBotLogic() {
     // Функция обработки анонимного сообщения
     async function handleAnonymousMessage(chatId, msg, userData) {
         const ownerChatId = userData.targetOwner;
-        const ownerData = await getUserData(ownerChatId); // <-- Асинхронно
+        const ownerData = await getUserData(ownerChatId); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         if (!ownerData) {
             userData.waitingFor = null;
             userData.targetOwner = null;
-            await updateUserData(chatId, userData); // <-- Асинхронно
+            await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
             return bot.sendMessage(chatId, '❌ Получатель недоступен');
         }
 
@@ -342,7 +344,7 @@ async function initializeBotLogic() {
         if (ownerData.blockedUsers.includes(userData.anonymousId)) {
             userData.waitingFor = null;
             userData.targetOwner = null;
-            await updateUserData(chatId, userData); // <-- Асинхронно
+            await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
             return bot.sendMessage(chatId, '🚫 Вы заблокированы этим пользователем');
         }
 
@@ -350,12 +352,12 @@ async function initializeBotLogic() {
         ownerData.lastAnonSender = userData.anonymousId;
         ownerData.lastAnonSenderChatId = String(chatId);
         ownerData.messagesReceived = (ownerData.messagesReceived || 0) + 1;
-        await updateUserData(ownerChatId, ownerData); // <-- Асинхронно
+        await updateUserData(ownerChatId, ownerData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         userData.messagesSent = (userData.messagesSent || 0) + 1;
         userData.waitingFor = null;
         userData.targetOwner = null;
-        await updateUserData(chatId, userData); // <-- Асинхронно
+        await updateUserData(chatId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
 
         // Отправляем сообщение получателю
         const keyboard = {
@@ -474,4 +476,4 @@ bot.on('error', (error) => {
 });
 
 console.log('🚀 Бот запускается...');
-                    
+                
