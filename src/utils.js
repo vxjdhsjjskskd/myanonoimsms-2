@@ -21,7 +21,6 @@ async function generateAnonymousId() {
         for (let i = 0; i < ANONYMOUS_ID_LENGTH; i++) {
             newId += chars.charAt(Math.floor(Math.random() * chars.length));
         }
-        // Проверяем уникальность в базе данных
         const existingUser = await User.findOne({ anonymousId: newId });
         if (!existingUser) {
             isUnique = true;
@@ -34,7 +33,7 @@ async function generateAnonymousId() {
  * Генерирует уникальный 8-символьный код для анонимной ссылки, проверяя его уникальность в БД.
  * @returns {Promise<string>} Уникальный код ссылки.
  */
-async function generateLinkCode() { // Имя изменено с generateUniqueLinkCode на generateLinkCode для соответствия app.js
+async function generateLinkCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let newCode;
     let isUnique = false;
@@ -43,7 +42,6 @@ async function generateLinkCode() { // Имя изменено с generateUnique
         for (let i = 0; i < ANONYMOUS_LINK_CODE_LENGTH; i++) {
             newCode += chars.charAt(Math.floor(Math.random() * chars.length));
         }
-        // Проверяем уникальность в базе данных
         const existingUser = await User.findOne({ linkCode: newCode });
         if (!existingUser) {
             isUnique = true;
@@ -59,23 +57,6 @@ async function generateLinkCode() { // Имя изменено с generateUnique
  */
 function getTodayDateString() {
     return new Date().toISOString().split('T')[0];
-}
-
-/**
- * Проверяет, заблокировал ли один пользователь другого.
- * @param {string} blockerAnonId - Анонимный ID блокирующего пользователя.
- * @param {string} blockedAnonId - Анонимный ID заблокированного пользователя.
- * @returns {boolean} True, если заблокирован, иначе False.
- */
-function isBlocked(blockerAnonId, blockedAnonId) {
-    // Эта функция теперь должна получать данные блокировок из БД.
-    // Для этого она должна быть асинхронной и принимать User объект или получать его внутри.
-    // Пока оставим как есть, но это место, которое нужно будет адаптировать.
-    // В текущей схеме User.blockedUsers - это массив внутри User документа.
-    // Поэтому проверку блокировки нужно будет делать, получая User.blockedUsers.
-    console.warn("[Utils] isBlocked: Эта функция должна быть асинхронной и получать данные из БД.");
-    // Временно возвращаем false, пока не адаптируем handlers.js
-    return false;
 }
 
 /**
@@ -96,9 +77,8 @@ function checkAutoBlock(messageText) {
 // Экспортируем все вспомогательные функции и константы
 module.exports = {
     generateAnonymousId,
-    generateLinkCode, // Имя изменено
+    generateLinkCode,
     getTodayDateString,
-    isBlocked,
     checkAutoBlock,
     AUTO_BLOCK_DURATION_HOURS
 };
