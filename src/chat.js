@@ -1,7 +1,7 @@
 // src/chat.js - Функции для работы с чатами/сообщениями (обновленный для MongoDB)
 
 // Импортируем только те функции, которые нужны и будут заглушками
-const { getMessages, addMessage } = require('./dataAccess'); // <--- ИЗМЕНЕНО: inMemoryDb -> dataAccess
+const { getMessages, addMessage } = require('./dataAccess');
 
 /**
  * Добавляет новое сообщение в историю.
