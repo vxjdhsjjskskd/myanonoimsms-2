@@ -52,7 +52,12 @@ async function getAnonLinkMap() {
     const users = await User.find({}).select('linkCode chatId').lean();
     const linkMap = {};
     users.forEach(user => {
-        linkMap[user.linkCode.toUpperCase()] = user.chatId;
+        // Добавлена проверка на user.linkCode
+        if (user.linkCode) {
+            linkMap[user.linkCode.toUpperCase()] = user.chatId;
+        } else {
+            console.warn(`[DB Access] Пользователь с chatId ${user.chatId} не имеет linkCode.`);
+        }
     });
     return linkMap;
 }
