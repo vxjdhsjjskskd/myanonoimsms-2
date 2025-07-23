@@ -1,13 +1,13 @@
-// src/user.js - Функции для работы с пользователями (обновленный для AnonAskBot и MongoDB)
+// src/user.js - Функции для работы с пользователями (обновленный для AnonAskBot и MongoDB - Упрощенная)
 
 // Импортируем функции доступа к данным из dataAccess.js (они теперь асинхронны)
 const {
     getUserData,
     updateUserData,
-} = require('./dataAccess'); // <--- ИЗМЕНЕНО: inMemoryDb -> dataAccess
+} = require('./dataAccess');
 
-// Импортируем функции из utils.js (они тоже теперь асинхронны)
-const { generateAnonymousId, getTodayDateString, generateLinkCode } = require('./utils'); // <--- ИЗМЕНЕНО: generateUniqueLinkCode -> generateLinkCode
+// Импортируем функции из utils.js (они теперь асинхронны)
+const { getTodayDateString, generateLinkCode } = require('./utils'); // generateAnonymousId удален
 
 /**
  * Регистрирует нового пользователя или возвращает данные существующего.
@@ -16,75 +16,46 @@ const { generateAnonymousId, getTodayDateString, generateLinkCode } = require('.
  */
 async function registerUser(telegramId) {
     const telegramIdStr = String(telegramId);
-    let userData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    let userData = await getUserData(telegramIdStr); // АСИНХРОННЫЙ ВЫЗОВ
 
     if (!userData) {
-        const anonId = await generateAnonymousId(); // <--- АСИНХРОННЫЙ ВЫЗОВ
-        const anonLinkCode = await generateLinkCode(); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        const anonLinkCode = await generateLinkCode(); // АСИНХРОННЫЙ ВЫЗОВ
         const today = getTodayDateString(); // Эта функция синхронна
 
         const newUserData = {
             chatId: telegramIdStr, // Добавляем chatId для создания нового пользователя
-            anonymousId: anonId, // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
-            anonLinkCode: anonLinkCode, // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
-            registeredAt: new Date(), // <--- ИЗМЕНЕНО: registration_date -> registeredAt, используем Date
-            messagesReceived: 0, // Добавлено, если не было
-            messagesSent: 0, // Добавлено, если не было
-            blockedUsers: [], // Добавлено, если не было
-            messagesSentToday: 0, // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
-            lastSentDate: today, // <--- ИЗМЕНЕНО: last_sent_date -> lastSentDate
-            isAutoBlocked: false, // <--- ИЗМЕНЕНО: is_auto_blocked -> isAutoBlocked
-            autoBlockUntil: null, // <--- ИЗМЕНЕНО: auto_block_until -> autoBlockUntil
-            currentCommandStep: null, // <--- ИЗМЕНЕНО: current_command_step -> currentCommandStep
-            tempData: {}, // <--- ИЗМЕНЕНО: temp_data -> tempData
-            lastAnonSenderChatId: null // <--- ИЗМЕНЕНО: last_anon_sender_chat_id -> lastAnonSenderChatId
+            anonLinkCode: anonLinkCode,
+            registeredAt: new Date(),
+            messagesReceived: 0,
+            messagesSent: 0,
+            blockedUsers: [], // Массив Telegram Chat ID для блокировок
+            isAutoBlocked: false,
+            autoBlockUntil: null,
+            currentCommandStep: null,
+            tempData: {},
+            lastAnonSenderChatId: null
         };
-        userData = await updateUserData(telegramIdStr, newUserData); // <--- АСИНХРОННЫЙ ВЫЗОВ
-        console.log(`[User] Новый пользователь зарегистрирован: ${telegramIdStr} -> ${anonId}, ссылка: ${anonLinkCode}`);
+        userData = await updateUserData(telegramIdStr, newUserData); // АСИНХРОННЫЙ ВЫЗОВ
+        console.log(`[User] Новый пользователь зарегистрирован: ${telegramIdStr}, ссылка: ${anonLinkCode}`);
         return userData;
     } else {
-        console.log(`[User] Существующий пользователь: ${telegramIdStr} -> ${userData.anonymousId}`); // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
+        console.log(`[User] Существующий пользователь: ${telegramIdStr}`);
         return userData;
     }
 }
 
 /**
  * Обновляет счетчик сообщений пользователя за день.
+ * (Эта функция не используется в текущей логике, так как нет лимитов на отправку анонимных сообщений)
  * @param {string|number} telegramId - Telegram ID пользователя.
  * @param {object} userData - Текущие данные пользователя (уже полученные из БД).
  * @returns {Promise<void>}
  */
 async function updateMessageCount(telegramId, userData) {
-    const today = getTodayDateString();
-    if (userData.lastSentDate !== today) { // <--- ИЗМЕНЕНО: last_sent_date -> lastSentDate
-        userData.messagesSentToday = 0; // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
-        userData.lastSentDate = today; // <--- ИЗМЕНЕНО: last_sent_date -> lastSentDate
-    }
-    userData.messagesSentToday++; // <--- ИЗМЕНЕНО: messages_sent_today -> messagesSentToday
-    await updateUserData(telegramId, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
-}
-
-/**
- * Меняет анонимный ID пользователя на новый.
- * @param {string|number} telegramId - Telegram ID пользователя.
- * @returns {Promise<string>} Новый анонимный ID.
- */
-async function changeAnonymousId(telegramId) {
-    const telegramIdStr = String(telegramId);
-    let userData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
-
-    if (!userData) {
-        userData = await registerUser(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
-    }
-
-    const oldAnonId = userData.anonymousId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
-    const newAnonId = await generateAnonymousId(); // <--- АСИНХРОННЫЙ ВЫЗОВ
-
-    userData.anonymousId = newAnonId; // <--- ИЗМЕНЕНО: anonymous_id -> anonymousId
-    await updateUserData(telegramIdStr, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
-
-    console.log(`[User] ID пользователя ${telegramIdStr} изменен с ${oldAnonId} на ${newAnonId}`);
-    return newAnonId;
+    // Эта функция не используется в вашей описанной логике (нет лимитов на сообщения).
+    // Если она вам понадобится в будущем, ее нужно будет доработать.
+    console.warn("[User] updateMessageCount вызывается, но не используется в текущей логике.");
+    return Promise.resolve();
 }
 
 /**
@@ -94,25 +65,26 @@ async function changeAnonymousId(telegramId) {
  */
 async function changeAnonymousLink(telegramId) {
     const telegramIdStr = String(telegramId);
-    let userData = await getUserData(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    let userData = await getUserData(telegramIdStr); // АСИНХРОННЫЙ ВЫЗОВ
 
     if (!userData) {
-        userData = await registerUser(telegramIdStr); // <--- АСИНХРОННЫЙ ВЫЗОВ
+        userData = await registerUser(telegramIdStr); // АСИНХРОННЫЙ ВЫЗОВ
     }
 
-    const oldAnonLinkCode = userData.anonLinkCode; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
-    const newAnonLinkCode = await generateLinkCode(); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    const oldAnonLinkCode = userData.anonLinkCode;
+    const newAnonLinkCode = await generateLinkCode(); // АСИНХРОННЫЙ ВЫЗОВ
 
-    userData.anonLinkCode = newAnonLinkCode; // <--- ИЗМЕНЕНО: anon_link_code -> anonLinkCode
-    await updateUserData(telegramIdStr, userData); // <--- АСИНХРОННЫЙ ВЫЗОВ
+    userData.anonLinkCode = newAnonLinkCode;
+    await updateUserData(telegramIdStr, userData); // АСИНХРОННЫЙ ВЫЗОВ
 
     console.log(`[User] Анонимная ссылка пользователя ${telegramIdStr} изменена с ${oldAnonLinkCode} на ${newAnonLinkCode}`);
     return newAnonLinkCode;
 }
 
+// changeAnonymousId удален, так как anonymousId больше не используется
+
 module.exports = {
     registerUser,
     updateMessageCount,
-    changeAnonymousId,
     changeAnonymousLink
 };
