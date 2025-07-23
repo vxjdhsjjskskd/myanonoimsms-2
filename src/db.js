@@ -18,11 +18,10 @@ async function connectDb() {
 
     try {
         await mongoose.connect(mongoUri, {
-            // Опции для предотвращения предупреждений Mongoose
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-            // useCreateIndex: true, // Устарело в Mongoose 6+
-            // useFindAndModify: false // Устарело в Mongoose 6+
+            // useNewUrlParser и useUnifiedTopology больше не нужны в Mongoose 6+
+            // и вызывают предупреждения. Их можно безопасно удалить.
+            // useNewUrlParser: true,
+            // useUnifiedTopology: true,
         });
         console.log('[DB] Успешно подключено к MongoDB Atlas!');
     } catch (error) {
