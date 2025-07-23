@@ -19,8 +19,8 @@
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.19.2",       // Обновлено до актуальной версии Express
+    "express": "^4.19.2",       
     "node-telegram-bot-api": "^0.66.0",
-    "mongoose": "^8.4.4"        // <--- НОВАЯ ЗАВИСИМОСТЬ
+    "mongoose": "^8.4.4"        
   }
 }
