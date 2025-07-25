@@ -101,7 +101,8 @@ async def on_startup_app(app: web.Application):
         logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
         logger.exception(f"Failed to connect to MongoDB Atlas: {e}")
-        raise # Если подключение к БД критично, можно прервать запуск
+        # Если подключение к БД критично, можно прервать запуск
+        raise
 
     # Устанавливаем вебхук на Telegram API
     # drop_pending_updates=True очищает все накопившиеся обновления
@@ -137,16 +138,28 @@ async def main():
     web_app.on_shutdown.append(on_shutdown_app)
 
     logger.info(f"Starting web server for webhook on port {PORT}...")
+    
+    # Запускаем aiohttp веб-сервер
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+
+    logger.info(f"Web server started on 0.0.0.0:{PORT}. Keeping process alive...")
+
+    # Этот Future будет использоваться для поддержания работы event loop.
+    # Он никогда не будет разрешен, пока процесс не будет остановлен извне (например, Render).
+    # Это гарантирует, что main() не завершится преждевременно.
     try:
-        # Запускаем aiohttp веб-сервер
-        # Он будет слушать на всех интерфейсах (0.0.0.0) и на указанном порту
-        await web._run_app(web_app, host='0.0.0.0', port=PORT)
+        await asyncio.Future() # Блокируем main() навсегда
     except asyncio.CancelledError:
-        logger.info("Application stopped by CancelledError.")
+        logger.info("Application stopped by CancelledError (e.g., SIGTERM).")
     except Exception as e:
-        logger.exception(f"An error occurred during webhook startup: {e}")
+        logger.exception(f"An unexpected error occurred in main loop: {e}")
     finally:
-        logger.info("Bot stopped.")
+        # Очистка ресурсов при завершении работы
+        await runner.cleanup()
+        logger.info("Web server stopped and resources cleaned up.")
 
 
 if __name__ == "__main__":
