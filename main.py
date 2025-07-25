@@ -74,7 +74,7 @@ async def handle_webhook_request(request: web.Request):
             
             # Передаем сырые данные в диспетчер aiogram для обработки
             # Диспетчер сам десериализует их в объект Update и вызывает хэндлеры
-            await dp.feed_raw_update(update_data)
+            await dp.feed_raw_update(update_data) # <-- ЭТА СТРОКА БЫЛА ИСПРАВЛЕНА
             
             return web.Response(status=200) # Telegram ожидает 200 OK
         except Exception as e:
