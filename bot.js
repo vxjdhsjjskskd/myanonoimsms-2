@@ -1,8 +1,7 @@
 import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import dotenv from 'dotenv';
 
-// Импортируем модель пользователя и сервисы базы данных
-// ИЗМЕНЕНО: getChatIdByCode -> getTgIdByCode
+// Импортируем сервисы базы данных и клавиатуры
 import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick } from './dbService.js';
 import { cancelKeyboard, sendAgainKeyboard } from './keyboards.js';
 
@@ -216,3 +215,41 @@ bot.on('message', async (ctx) => {
     }
 });
 
+
+// --- ЗАПУСК БОТА ---
+// Эта функция будет вызываться при импорте bot.js
+const startBot = async () => {
+    // Ждем, пока MongoDB будет подключен
+    while (!global.mongooseConnection || global.mongooseConnection.readyState !== 1) {
+        console.log('[Bot Startup] Ожидание подключения к MongoDB...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    // Удаление вебхука перед запуском Long Polling
+    try {
+        console.log('[Bot Startup] Попытка удалить существующий вебхук перед запуском Long Polling...');
+        const deleted = await bot.telegram.deleteWebhook();
+        if (deleted) {
+            console.log('[Bot Startup] Вебхук успешно удален.');
+        } else {
+            console.log('[Bot Startup] Вебхук не был активен или уже удален.');
+        }
+    } catch (error) {
+        console.error('[Bot Startup] Ошибка при удалении вебхука:', error.message);
+    }
+
+    // Запуск бота в режиме Long Polling
+    bot.launch()
+        .then(() => {
+            console.log('✅ Telegraf бот запущен в режиме Long Polling.');
+        })
+        .catch(err => {
+            console.error('❌ Ошибка при запуске Telegraf бота:', err);
+            // Если это 409 Conflict, Render перезапустит сервис, и он может запуститься успешно.
+        });
+};
+
+// Вызываем функцию запуска бота сразу при импорте этого модуля
+startBot();
+
+                          
