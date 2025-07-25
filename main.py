@@ -63,7 +63,7 @@ dp.include_routers(commands.rt, handlers.rt)
 
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup(bot: Bot):
+async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
     """
     Функция, выполняемая при запуске бота.
     Здесь происходит подключение к БД и установка вебхука.
@@ -85,7 +85,7 @@ async def on_startup(bot: Bot):
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown(bot: Bot):
+async def on_shutdown_webhook(dispatcher: Dispatcher, bot: Bot):
     """
     Функция, выполняемая при остановке бота.
     Здесь удаляется вебхук и закрывается сессия бота.
@@ -102,39 +102,28 @@ async def main():
     """
     Главная асинхронная функция, которая запускает бота как веб-сервис.
     """
-    # Зарегистрируем on_startup и on_shutdown в диспетчере,
-    # чтобы они были вызваны перед запуском и после остановки веб-сервера.
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
+    # Регистрируем функции on_startup и on_shutdown
+    # Эти функции будут вызваны aiogram перед запуском и после остановки веб-сервера.
+    dp.startup.register(on_startup_webhook)
+    dp.shutdown.register(on_shutdown_webhook)
 
-    # Создаем aiohttp.web.Application
-    web_app = web.Application()
-
-    # В aiogram 3.x для вебхуков используется dp.update.dispatcher.web_handler.
-    # Этот метод будет обрабатывать входящие HTTP POST запросы от Telegram.
-    # Важно: web_handler - это метод самого диспетчера, а не его подмодулей.
-    web_app.router.add_post(WEBHOOK_PATH, dp.update.web_handler) # <-- ИСПРАВЛЕННАЯ СТРОКА
-
-    # Запускаем aiohttp веб-сервер
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    
-    logger.info(f"Web server started on 0.0.0.0:{PORT}. Waiting for webhooks...")
-
-    # Держим главный цикл asyncio запущенным, чтобы веб-сервер продолжал работать.
-    # Это позволяет aiohttp обрабатывать входящие запросы.
+    # Важно: В aiogram 3.x для запуска вебхуков используется объект web_app
+    # который автоматически создается диспетчером при настройке вебхуков.
+    # Мы будем использовать dp.run_webhook().
+    logger.info(f"Starting web server for webhook on port {PORT}...")
     try:
-        while True:
-            await asyncio.sleep(3600) # Ожидаем в "бесконечном" цикле
+        await dp.run_webhook( # <-- ИСПОЛЬЗУЕМ run_webhook
+            webhook_url=WEBHOOK_URL,
+            # Встроенный веб-сервер aiogram будет слушать на всех интерфейсах (0.0.0.0) и на указанном порту
+            web_server_host='0.0.0.0',
+            web_server_port=PORT
+        )
     except asyncio.CancelledError:
         logger.info("Application stopped by CancelledError.")
     except Exception as e:
-        logger.exception(f"An error occurred during webhook runtime: {e}")
+        logger.exception(f"An error occurred during webhook startup: {e}")
     finally:
-        await runner.cleanup()
-        logger.info("Web server stopped.")
+        logger.info("Bot stopped.")
 
 
 if __name__ == "__main__":
