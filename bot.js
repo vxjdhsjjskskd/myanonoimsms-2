@@ -2,8 +2,8 @@ import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import dotenv from 'dotenv';
 
 // Импортируем сервисы базы данных и клавиатуры
-import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick, updateUserCode } from './dbService.js';
-import { cancelKeyboard, sendAgainKeyboard, replyToSenderKeyboard } from './keyboards.js';
+import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick, updateUserCode, blockUser, unblockUser, isUserBlocked } from './dbService.js';
+import { cancelKeyboard, writeMoreKeyboard, anonymousMessageButtons, confirmUnblockKeyboard } from './keyboards.js';
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -29,21 +29,28 @@ sendScene.on('text', async (ctx) => {
     const userIdToSend = ctx.scene.state.user; // Получатель
     const senderId = ctx.from.id; // Отправитель
 
+    // Проверяем, не заблокировал ли получатель отправителя
+    const isBlocked = await isUserBlocked(userIdToSend, senderId);
+    if (isBlocked) {
+        await ctx.reply(`🚫 Вы не можете отправить сообщение этому пользователю, так как он вас заблокировал.`, { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" });
+        return ctx.scene.leave();
+    }
+
     try {
         await addMessageCounts(senderId, userIdToSend);
 
         await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
             parse_mode: "Markdown",
-            reply_markup: replyToSenderKeyboard(senderId).reply_markup // Добавляем кнопку "Ответить"
+            reply_markup: anonymousMessageButtons(senderId, userIdToSend).reply_markup // Комбинированная кнопка Ответить + Заблокировать
         });
-        await ctx.reply(`✅ Сообщение отправлено!`, sendAgainKeyboard(userIdToSend));
+        await ctx.reply(`✅ Сообщение отправлено!`, { reply_to_message_id: ctx.message.message_id, reply_markup: writeMoreKeyboard(userIdToSend).reply_markup });
         await ctx.scene.leave();
     } catch (e) {
         console.error(`[Bot] Ошибка отправки текста от ${senderId} к ${userIdToSend}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
             `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
-            { parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
+            { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
         );
     }
 });
@@ -54,7 +61,14 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     const message = ctx.message;
     const baseText = "✉️ *Пришло новое сообщение!*\n\n";
     const caption = message.caption ? baseText + message.caption : baseText;
-    const replyMarkup = replyToSenderKeyboard(senderId).reply_markup; // Кнопка ответа
+    const replyMarkup = anonymousMessageButtons(senderId, userIdToSend).reply_markup; // Комбинированная кнопка
+
+    // Проверяем, не заблокировал ли получатель отправителя
+    const isBlocked = await isUserBlocked(userIdToSend, senderId);
+    if (isBlocked) {
+        await ctx.reply(`🚫 Вы не можете отправить сообщение этому пользователю, так как он вас заблокировал.`, { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" });
+        return ctx.scene.leave();
+    }
 
     try {
         await addMessageCounts(senderId, userIdToSend);
@@ -82,24 +96,24 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
         } else if (message.poll) {
             const question = message.poll.question;
             const options = message.poll.options.map(o => o.text);
-            await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup }); // Send base text with reply button
+            await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup });
             await ctx.telegram.sendPoll(userIdToSend, question, options, {
                 is_anonymous: message.poll.is_anonymous,
                 type: message.poll.type,
                 allows_multiple_answers: message.poll.allows_multiple_answers
             });
         } else {
-            return ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения или произошла ошибка. Пожалуйста, попробуйте другой тип.");
+            return ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения или произошла ошибка. Пожалуйста, попробуйте другой тип.", { reply_to_message_id: ctx.message.message_id });
         }
 
-        await ctx.reply(`✅ Сообщение отправлено!`, sendAgainKeyboard(userIdToSend));
+        await ctx.reply(`✅ Сообщение отправлено!`, { reply_to_message_id: ctx.message.message_id, reply_markup: writeMoreKeyboard(userIdToSend).reply_markup });
         await ctx.scene.leave();
     } catch (e) {
         console.error(`[Bot] Ошибка отправки медиа/опроса от ${senderId} к ${userIdToSend}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
             `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
-            { parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
+            { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
         );
     }
 });
@@ -111,17 +125,16 @@ sendScene.action('cancel', async (ctx) => {
     }
     await ctx.scene.leave();
 });
-
 // НОВАЯ СЦЕНА: Для ответа на анонимное сообщение
 const replyScene = new Scenes.BaseScene('replyScene');
 
 replyScene.enter(async (ctx) => {
     const originalSenderId = ctx.scene.state.originalSender; // Получаем ID оригинального отправителя из состояния сцены
     if (!originalSenderId) {
-        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown' });
+        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown', reply_to_message_id: ctx.message.message_id });
         return ctx.scene.leave();
     }
-    await ctx.reply('👉 Введите ваше анонимное ответное сообщение.', { reply_markup: cancelKeyboard().reply_markup });
+    await ctx.reply('👉 Введите ваше анонимное ответное сообщение.', { reply_markup: cancelKeyboard().reply_markup, reply_to_message_id: ctx.message.message_id });
 });
 
 // ИЗМЕНЕНО: Обработчик для пересылки сообщения (теперь пересоздает его для анонимности)
@@ -131,18 +144,23 @@ replyScene.on('message', async (ctx) => {
     const message = ctx.message;
     const baseText = "✉️ *Пришло анонимное ответное сообщение!*\n\n";
     const caption = message.caption ? baseText + message.caption : baseText;
-    const replyMarkup = replyToSenderKeyboard(replierId).reply_markup; // Кнопка ответа для оригинального отправителя
+    const replyMarkup = anonymousMessageButtons(replierId, originalSenderId).reply_markup; // Кнопка ответа для оригинального отправителя
 
     if (!originalSenderId) {
-        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown' });
+        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown', reply_to_message_id: ctx.message.message_id });
+        return ctx.scene.leave();
+    }
+
+    // Проверяем, не заблокировал ли оригинальный отправитель отвечающего
+    const isBlocked = await isUserBlocked(originalSenderId, replierId);
+    if (isBlocked) {
+        await ctx.reply(`🚫 Вы не можете отправить ответ этому пользователю, так как он вас заблокировал.`, { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" });
         return ctx.scene.leave();
     }
 
     try {
-        // Обновляем счетчики: replier отправляет, originalSenderId получает
         await addMessageCounts(replierId, originalSenderId);
 
-        // Пересоздаем сообщение вместо пересылки для анонимности
         if (message.text) {
             await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, { parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.photo) {
@@ -175,18 +193,18 @@ replyScene.on('message', async (ctx) => {
                 allows_multiple_answers: message.poll.allows_multiple_answers
             });
         } else {
-            await ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения для анонимного ответа. Пожалуйста, попробуйте другой тип.");
-            return ctx.scene.leave(); // Выходим из сцены, если тип не поддерживается
+            await ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения для анонимного ответа. Пожалуйста, попробуйте другой тип.", { reply_to_message_id: ctx.message.message_id });
+            return ctx.scene.leave();
         }
 
-        await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { parse_mode: 'Markdown' });
+        await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { reply_to_message_id: ctx.message.message_id, parse_mode: 'Markdown' });
         await ctx.scene.leave();
     } catch (e) {
         console.error(`[Bot] Ошибка отправки ответного сообщения от ${replierId} к ${originalSenderId}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка при отправке ответного сообщения: \`${e.message}\`\n\n` +
             `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
-            { parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
+            { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
         );
     }
 });
@@ -226,15 +244,13 @@ bot.use(async (ctx, next) => {
         const timeLeft = (COOLDOWN_SECONDS * 1000) - timeElapsed;
         if (timeLeft > 0) {
             const secondsLeft = Math.ceil(timeLeft / 1000);
-            return ctx.reply(`Пожалуйста, подождите ${secondsLeft} секунд перед отправкой следующего запроса.`);
+            return ctx.reply(`Пожалуйста, подождите ${secondsLeft} секунд перед отправкой следующего запроса.`, { reply_to_message_id: ctx.message.message_id });
         }
     }
     cooldowns.set(userId, now);
     return next();
 });
-
-
-// --- Обработчики команд ---
+               // --- Обработчики команд ---
 
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
@@ -244,36 +260,42 @@ bot.start(async (ctx) => {
     const userCode = await getUserCode(chatId);
 
     const botInfo = await ctx.telegram.getMe();
-    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
+    const link = `https.t.me/${botInfo.username}?start=${userCode}`;
 
     if (messageText && messageText.length > 6 && messageText.startsWith('/start ')) {
         const receivedCode = messageText.substring(7);
         const userIdToSend = await getTgIdByCode(receivedCode);
 
         if (userIdToSend) {
+            // Проверяем, не заблокировал ли получатель отправителя (текущего пользователя)
+            const isBlocked = await isUserBlocked(userIdToSend, chatId);
+            if (isBlocked) {
+                await ctx.reply(`🚫 Вы не можете отправить сообщение этому пользователю, так как он вас заблокировал.`, { parse_mode: "Markdown", reply_to_message_id: ctx.message.message_id });
+                return; // Не входим в сцену отправки
+            }
             await addLinkClick(userIdToSend);
             await ctx.scene.enter('sendScene', { user: userIdToSend });
         } else {
-            await ctx.reply(`Неверный код пользователя: \`${receivedCode}\`. Пожалуйста, проверьте ссылку.`, { parse_mode: "Markdown" });
+            await ctx.reply(`Неверный код пользователя: \`${receivedCode}\`. Пожалуйста, проверьте ссылку.`, { parse_mode: "Markdown", reply_to_message_id: ctx.message.message_id });
         }
     } else {
         await ctx.reply(
             `🚀 Начни получать анонимные сообщения прямо сейчас!\n\n` +
             `Твоя ссылка:\n👉 \`${link}\`\n\n` +
             `Размести эту ссылку ☝️ в описании профиля Telegram/TikTok/Instagram, чтобы начать получать анонимные сообщения 💬`,
-            { parse_mode: 'Markdown' }
+            { parse_mode: 'Markdown', reply_to_message_id: ctx.message.message_id }
         );
     }
 });
 
-// ИЗМЕНЕНО: Команда /profile теперь /stats
+// Команда /profile теперь /stats
 bot.command('stats', async (ctx) => {
     const chatId = ctx.chat.id;
     const { received, sent, linkClicks } = await getMessageCounts(chatId);
     const userCode = await getUserCode(chatId);
 
     const botInfo = await ctx.telegram.getMe();
-    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
+    const link = `https.t.me/${botInfo.username}?start=${userCode}`;
 
     await ctx.reply(
         `➖➖➖➖➖➖➖➖➖➖➖\n` +
@@ -284,7 +306,7 @@ bot.command('stats', async (ctx) => {
         `🔗 Твоя ссылка: \n` +
         `👉\`${link}\`\n` +
         `➖➖➖➖➖➖➖➖➖➖➖`,
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'Markdown', reply_to_message_id: ctx.message.message_id }
     );
 });
 
@@ -293,7 +315,7 @@ bot.command('url', async (ctx) => {
     const chatId = ctx.chat.id;
     const userCode = await getUserCode(chatId);
     const botInfo = await ctx.telegram.getMe();
-    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
+    const link = `https.t.me/${botInfo.username}?start=${userCode}`;
 
     await ctx.reply(
         `🔗 *Ваша текущая ссылка:*\n👉 \`${link}\`\n\n` +
@@ -304,7 +326,8 @@ bot.command('url', async (ctx) => {
             reply_markup: Markup.inlineKeyboard([
                 Markup.button.callback('Сгенерировать новую ссылку', 'generate_new_link')
             ]).reply_markup,
-            parse_mode: 'Markdown'
+            parse_mode: 'Markdown',
+            reply_to_message_id: ctx.message.message_id
         }
     );
 });
@@ -315,21 +338,21 @@ bot.action('generate_new_link', async (ctx) => {
     const chatId = ctx.from.id;
     const newCode = await updateUserCode(chatId); // Используем новую функцию из dbService
     const botInfo = await ctx.telegram.getMe();
-    const newLink = `https://t.me/${botInfo.username}?start=${newCode}`;
+    const newLink = `https.t.me/${botInfo.username}?start=${newCode}`;
 
     await ctx.editMessageText(
         `✅ *Ваша новая ссылка успешно сгенерирована:*\n👉 \`${newLink}\`\n\n` +
         `Ваша старая ссылка больше недействительна.`,
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'Markdown', reply_to_message_id: ctx.callbackQuery.message.message_id } // reply_to_message_id для edit
     );
 });
 
 
 bot.command('help', async (ctx) => {
-    await ctx.reply("Помощь будет");
+    await ctx.reply("Помощь будет", { reply_to_message_id: ctx.message.message_id });
 });
 
-// Обработка callback_query для кнопки "Отправить ещё раз"
+// Обработка callback_query для кнопки "Написать еще"
 bot.action(/^again_(.+)$/, async (ctx) => {
     const userIdToSend = ctx.match[1];
     await ctx.answerCbQuery();
@@ -339,28 +362,47 @@ bot.action(/^again_(.+)$/, async (ctx) => {
     await ctx.scene.enter('sendScene', { user: userIdToSend });
 });
 
-// НОВЫЙ ОБРАБОТЧИК: Обработка callback_query для кнопки "Ответить анонимно"
+// ОБРАБОТЧИК: Обработка callback_query для кнопки "Ответить"
 bot.action(/^reply_to_sender_(.+)$/, async (ctx) => {
-    const originalSenderId = ctx.match[1]; // Получаем ID оригинального отправителя
+    const originalSenderId = ctx.match[1];
     await ctx.answerCbQuery('Подготовка к ответу...');
     if (ctx.callbackQuery.message) {
-        await ctx.deleteMessage(ctx.callbackQuery.message.message_id); // Удаляем сообщение с кнопкой "Ответить"
+        await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
     }
-    // Переходим в сцену ответа, передавая ID оригинального отправителя
     ctx.scene.enter('replyScene', { originalSender: originalSenderId });
+});
+
+// ОБРАБОТЧИК: Блокировка пользователя
+bot.action(/^block_user_(.+)_from_(.+)$/, async (ctx) => {
+    const blockedTgId = parseInt(ctx.match[1]); // ID пользователя, которого нужно заблокировать
+    const blockerTgId = parseInt(ctx.match[2]); // ID пользователя, который блокирует (текущий пользователь)
+
+    await ctx.answerCbQuery('Блокировка пользователя...');
+
+    if (blockerTgId !== ctx.from.id) { // Проверяем, что блокирует тот, кто нажал кнопку
+        return ctx.reply('⚠️ Ошибка: Вы не можете заблокировать пользователя от имени другого аккаунта.', { reply_to_message_id: ctx.callbackQuery.message.message_id });
+    }
+
+    try {
+        await blockUser(blockerTgId, blockedTgId);
+        await ctx.editMessageText(`🚫 Пользователь ${blockedTgId} успешно заблокирован. Вы больше не будете получать от него анонимные сообщения.`, { parse_mode: 'Markdown' });
+    } catch (e) {
+        console.error(`[Bot] Ошибка блокировки пользователя ${blockerTgId} -> ${blockedTgId}:`, e.message);
+        await ctx.editMessageText(`⚠️❌ Произошла ошибка при блокировке: \`${e.message}\`. Попробуйте ещё раз.`, { parse_mode: 'Markdown' });
+    }
 });
 
 
 // Общий обработчик текстовых сообщений (если не попал ни в одну команду/FSM)
 bot.on('text', async (ctx) => {
-    await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.');
+    await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.', { reply_to_message_id: ctx.message.message_id });
 });
 
 // Обработка любых других типов сообщений, не обработанных FSM
 bot.on('message', async (ctx) => {
     const handledByScene = ctx.session && ctx.session.__scenes && ctx.session.__scenes.current;
     if (!handledByScene && !ctx.message.text && !ctx.message.caption && !ctx.message.photo && !ctx.message.video && !ctx.message.document && !ctx.message.audio && !ctx.message.voice && !ctx.message.video_note && !ctx.message.sticker && !ctx.message.poll) {
-        await ctx.reply('Я не понял ваш запрос. Пожалуйста, используйте команды из меню или отправьте поддерживаемый тип сообщения.');
+        await ctx.reply('Я не понял ваш запрос. Пожалуйста, используйте команды из меню или отправьте поддерживаемый тип сообщения.', { reply_to_message_id: ctx.message.message_id });
     }
 });
 
@@ -372,7 +414,6 @@ const startBot = async () => {
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // Удаление вебхука перед запуском Long Polling
     try {
         console.log('[Bot Startup] Попытка удалить существующий вебхук перед запуском Long Polling...');
         const deleted = await bot.telegram.deleteWebhook();
@@ -385,7 +426,6 @@ const startBot = async () => {
         console.error('[Bot Startup] Ошибка при удалении вебхука:', error.message);
     }
 
-    // Установка команд для меню Telegram
     await bot.telegram.setMyCommands([
         { command: 'start', description: '🚀 Запустить бота' },
         { command: 'stats', description: '📊 Моя статистика' },
@@ -394,7 +434,6 @@ const startBot = async () => {
     ]);
     console.log('[Bot Startup] Команды Telegram установлены.');
 
-    // Запуск бота в режиме Long Polling
     bot.launch()
         .then(() => {
             console.log('✅ Telegraf бот запущен в режиме Long Polling.');
@@ -411,11 +450,8 @@ startBot();
 process.once('SIGINT', async () => {
     console.log('Получен сигнал SIGINT. Остановка бота...');
     await bot.stop('SIGINT'); // Останавливаем Telegraf бота
-    // MongoDB соединение будет закрыто в index.js
 });
 process.once('SIGTERM', async () => {
     console.log('Получен сигнал SIGTERM. Остановка бота...');
     await bot.stop('SIGTERM'); // Останавливаем Telegraf бота
-    // MongoDB соединение будет закрыто в index.js
 });
-                                
