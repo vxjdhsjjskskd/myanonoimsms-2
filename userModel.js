@@ -1,36 +1,40 @@
 import mongoose from 'mongoose';
 
-// --- Определение схемы пользователя для анонимного бота (как в Python) ---
+// --- Определение схемы пользователя для анонимного бота ---
 const userSchema = new mongoose.Schema({
-    tg_id: { // Соответствует tg_id из Python
+    tg_id: {
         type: Number,
         required: true,
         unique: true
     },
-    code: { // Соответствует code из Python
+    code: {
         type: String,
         required: true,
         unique: true
     },
-    message_get: { // Соответствует message_get (полученные сообщения) из Python
+    message_get: {
         type: Number,
         default: 0
     },
-    message_count: { // Соответствует message_count (отправленные сообщения) из Python
+    message_count: {
         type: Number,
         default: 0
     },
-    linkClicksCount: { // Новое поле для подсчета переходов по ссылке
+    linkClicksCount: {
         type: Number,
         default: 0
     },
-    lastInteraction: { // Добавлено для удобства очистки неактивных пользователей
+    blockedUsers: { // НОВОЕ ПОЛЕ: Массив ID пользователей, которых заблокировал этот пользователь
+        type: [Number],
+        default: []
+    },
+    lastInteraction: {
         type: Date,
         default: Date.now
     }
 }, {
-    timestamps: true, // Добавляет createdAt и updatedAt автоматически
-    collection: 'anon_users' // <-- САМОЕ ВАЖНОЕ ИЗМЕНЕНИЕ: Указываем новую коллекцию!
+    timestamps: true,
+    collection: 'anon_users'
 });
 
 // Экспортируем модель
