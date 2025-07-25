@@ -102,31 +102,39 @@ async def main():
     """
     Главная асинхронная функция, которая запускает бота как веб-сервис.
     """
-    
-    # Регистрация функций on_startup и on_shutdown
-    # Это важно, так как они будут вызваны aiogram
+    # Зарегистрируем on_startup и on_shutdown в диспетчере,
+    # чтобы они были вызваны перед запуском и после остановки веб-сервера.
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
-    # Запуск веб-сервера aiohttp и обработка вебхуков
-    # aiogram 3.x использует web.run_app для запуска веб-сервера
-    # с встроенной логикой обработки вебхуков.
-    logger.info(f"Starting web server for webhook on port {PORT}...")
+    # Создаем aiohttp.web.Application
+    web_app = web.Application()
+
+    # В aiogram 3.x для вебхуков используется dp.update.dispatcher.web_handler.
+    # Этот метод будет обрабатывать входящие HTTP POST запросы от Telegram.
+    # Важно: web_handler - это метод самого диспетчера, а не его подмодулей.
+    web_app.router.add_post(WEBHOOK_PATH, dp.update.web_handler) # <-- ИСПРАВЛЕННАЯ СТРОКА
+
+    # Запускаем aiohttp веб-сервер
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    
+    logger.info(f"Web server started on 0.0.0.0:{PORT}. Waiting for webhooks...")
+
+    # Держим главный цикл asyncio запущенным, чтобы веб-сервер продолжал работать.
+    # Это позволяет aiohttp обрабатывать входящие запросы.
     try:
-        await dp.start_polling( # Используем start_polling для интеграции с aiohttp.web_app
-            bot,
-            webhook_url=WEBHOOK_URL,
-            # Создаем aiohttp.web.Application для aiogram
-            web_app_factory=lambda: web.Application(),
-            web_server_host='0.0.0.0',
-            web_server_port=PORT
-        )
+        while True:
+            await asyncio.sleep(3600) # Ожидаем в "бесконечном" цикле
     except asyncio.CancelledError:
         logger.info("Application stopped by CancelledError.")
     except Exception as e:
-        logger.exception(f"An error occurred during webhook startup: {e}")
+        logger.exception(f"An error occurred during webhook runtime: {e}")
     finally:
-        logger.info("Bot stopped.")
+        await runner.cleanup()
+        logger.info("Web server stopped.")
 
 
 if __name__ == "__main__":
