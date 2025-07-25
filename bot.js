@@ -2,7 +2,7 @@ import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import dotenv from 'dotenv';
 
 // Импортируем сервисы базы данных и клавиатуры
-import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick, updateUserCode, blockUser, unblockUser, isUserBlocked } from './dbService.js';
+import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick, updateUserCode, blockUser, unblockUser, isUserBlocked, saveAnonMessageContext, getAnonMessageContext } from './dbService.js';
 import { cancelKeyboard, writeMoreKeyboard, anonymousMessageButtons, confirmUnblockKeyboard } from './keyboards.js';
 
 // Загружаем переменные окружения
@@ -28,6 +28,7 @@ sendScene.enter(async (ctx) => {
 sendScene.on('text', async (ctx) => {
     const userIdToSend = ctx.scene.state.user; // Получатель
     const senderId = ctx.from.id; // Отправитель
+    const originalSenderMessageId = ctx.message.message_id; // ID сообщения, которое отправитель только что отправил боту
 
     // Проверяем, не заблокировал ли получатель отправителя
     const isBlocked = await isUserBlocked(userIdToSend, senderId);
@@ -39,10 +40,15 @@ sendScene.on('text', async (ctx) => {
     try {
         await addMessageCounts(senderId, userIdToSend);
 
-        await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
+        // Отправляем сообщение получателю
+        const sentMessageToRecipient = await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
             parse_mode: "Markdown",
-            reply_markup: anonymousMessageButtons(senderId, userIdToSend).reply_markup
+            reply_markup: anonymousMessageButtons(senderId, userIdToSend).reply_markup // Кнопка Заблокировать
         });
+
+        // Сохраняем контекст анонимного сообщения
+        await saveAnonMessageContext(sentMessageToRecipient.message_id, userIdToSend, senderId, originalSenderMessageId);
+
         await ctx.reply(`✅ Сообщение отправлено!`, { reply_to_message_id: ctx.message.message_id, reply_markup: writeMoreKeyboard(userIdToSend).reply_markup });
         await ctx.scene.leave();
     } catch (e) {
@@ -62,6 +68,7 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     const baseText = "✉️ *Пришло новое сообщение!*\n\n";
     const caption = message.caption ? baseText + message.caption : baseText;
     const replyMarkup = anonymousMessageButtons(senderId, userIdToSend).reply_markup;
+    const originalSenderMessageId = ctx.message.message_id;
 
     // Проверяем, не заблокировал ли получатель отправителя
     const isBlocked = await isUserBlocked(userIdToSend, senderId);
@@ -73,32 +80,32 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     try {
         await addMessageCounts(senderId, userIdToSend);
 
-        let sentMessage;
+        let sentMessageToRecipient;
         if (message.photo) {
-            sentMessage = await ctx.telegram.sendPhoto(userIdToSend, message.photo[message.photo.length - 1].file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+            sentMessageToRecipient = await ctx.telegram.sendPhoto(userIdToSend, message.photo[message.photo.length - 1].file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.video) {
-            sentMessage = await ctx.telegram.sendVideo(userIdToSend, message.video.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+            sentMessageToRecipient = await ctx.telegram.sendVideo(userIdToSend, message.video.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.document) {
-            sentMessage = await ctx.telegram.sendDocument(userIdToSend, message.document.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+            sentMessageToRecipient = await ctx.telegram.sendDocument(userIdToSend, message.document.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.audio) {
-            sentMessage = await ctx.telegram.sendAudio(userIdToSend, message.audio.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+            sentMessageToRecipient = await ctx.telegram.sendAudio(userIdToSend, message.audio.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.voice) {
-            sentMessage = await ctx.telegram.sendVoice(userIdToSend, message.voice.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+            sentMessageToRecipient = await ctx.telegram.sendVoice(userIdToSend, message.voice.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.video_note) {
             if (caption && caption !== baseText) {
                 await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
             }
-            sentMessage = await ctx.telegram.sendVideoNote(userIdToSend, message.video_note.file_id);
+            sentMessageToRecipient = await ctx.telegram.sendVideoNote(userIdToSend, message.video_note.file_id);
         } else if (message.sticker) {
             if (caption && caption !== baseText) {
                 await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
             }
-            sentMessage = await ctx.telegram.sendSticker(userIdToSend, message.sticker.file_id);
+            sentMessageToRecipient = await ctx.telegram.sendSticker(userIdToSend, message.sticker.file_id);
         } else if (message.poll) {
             const question = message.poll.question;
             const options = message.poll.options.map(o => o.text);
             await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup });
-            sentMessage = await ctx.telegram.sendPoll(userIdToSend, question, options, {
+            sentMessageToRecipient = await ctx.telegram.sendPoll(userIdToSend, question, options, {
                 is_anonymous: message.poll.is_anonymous,
                 type: message.poll.type,
                 allows_multiple_answers: message.poll.allows_multiple_answers
@@ -106,6 +113,9 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
         } else {
             return ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения или произошла ошибка. Пожалуйста, попробуйте другой тип.", { reply_to_message_id: ctx.message.message_id });
         }
+
+        // Сохраняем контекст анонимного сообщения
+        await saveAnonMessageContext(sentMessageToRecipient.message_id, userIdToSend, senderId, originalSenderMessageId);
 
         await ctx.reply(`✅ Сообщение отправлено!`, { reply_to_message_id: ctx.message.message_id, reply_markup: writeMoreKeyboard(userIdToSend).reply_markup });
         await ctx.scene.leave();
@@ -127,136 +137,12 @@ sendScene.action('cancel', async (ctx) => {
     await ctx.scene.leave();
 });
 
-// Сцена для ответа на анонимное сообщение
-const replyScene = new Scenes.BaseScene('replyScene');
+// УДАЛЕНА СЦЕНА replyScene - Ответы теперь обрабатываются в bot.on('message')
+// const replyScene = new Scenes.BaseScene('replyScene');
+// ... (удалена вся логика replyScene)
 
-replyScene.enter(async (ctx) => {
-    const originalSenderId = ctx.scene.state.originalSender; // Получаем ID оригинального отправителя из состояния сцены
-    const repliedToMessageId = ctx.callbackQuery.message.message_id; // ID сообщения, на которое нажали "Ответить"
+const stage = new Scenes.Stage([sendScene]); // ОБНОВЛЕНО: Только sendScene
 
-    if (!originalSenderId) {
-        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown', reply_to_message_id: repliedToMessageId });
-        return ctx.scene.leave();
-    }
-    await ctx.reply('👉 Введите ваше анонимное ответное сообщение.', { reply_markup: cancelKeyboard().reply_markup, reply_to_message_id: repliedToMessageId });
-});
-
-// Обработчик для пересоздания сообщения для анонимности
-replyScene.on('message', async (ctx) => {
-    const originalSenderId = ctx.scene.state.originalSender; // Оригинальный отправитель
-    const replierId = ctx.from.id; // Текущий пользователь, который отвечает
-    const message = ctx.message;
-    const baseText = "✉️ *Пришло анонимное ответное сообщение!*\n\n";
-    const caption = message.caption ? baseText + message.caption : baseText;
-    const replyMarkup = anonymousMessageButtons(replierId, originalSenderId).reply_markup;
-
-    if (!originalSenderId) {
-        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { reply_to_message_id: ctx.message.message_id, parse_mode: 'Markdown' });
-        return ctx.scene.leave();
-    }
-
-    // Проверяем, не заблокировал ли оригинальный отправитель отвечающего
-    const isBlocked = await isUserBlocked(originalSenderId, replierId);
-    if (isBlocked) {
-        await ctx.reply(`🚫 Вы не можете отправить ответ этому пользователю, так как он вас заблокировал.`, { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" });
-        return ctx.scene.leave();
-    }
-
-    try {
-        await addMessageCounts(replierId, originalSenderId);
-
-        let sentMessage;
-        // Используем message_id сообщения, на которое ответил пользователь, для имитации ответа
-        const replyToMessageIdForOriginalSender = ctx.message.reply_to_message ? ctx.message.reply_to_message.message_id : undefined;
-
-        if (message.text) {
-            sentMessage = await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, {
-                parse_mode: "Markdown",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyToMessageIdForOriginalSender // Имитация ответа
-            });
-        } else if (message.photo) {
-            sentMessage = await ctx.telegram.sendPhoto(originalSenderId, message.photo[message.photo.length - 1].file_id, {
-                caption: caption,
-                parse_mode: "Markdown",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyToMessageIdForOriginalSender
-            });
-        } else if (message.video) {
-            sentMessage = await ctx.telegram.sendVideo(originalSenderId, message.video.file_id, {
-                caption: caption,
-                parse_mode: "Markdown",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyToMessageIdForOriginalSender
-            });
-        } else if (message.document) {
-            sentMessage = await ctx.telegram.sendDocument(originalSenderId, message.document.file_id, {
-                caption: caption,
-                parse_mode: "Markdown",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyToMessageIdForOriginalSender
-            });
-        } else if (message.audio) {
-            sentMessage = await ctx.telegram.sendAudio(originalSenderId, message.audio.file_id, {
-                caption: caption,
-                parse_mode: "Markdown",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyToMessageIdForOriginalSender
-            });
-        } else if (message.voice) {
-            sentMessage = await ctx.telegram.sendVoice(originalSenderId, message.voice.file_id, {
-                caption: caption,
-                parse_mode: "Markdown",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyToMessageIdForOriginalSender
-            });
-        } else if (message.video_note) {
-            if (caption && caption !== baseText) {
-                await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: replyToMessageIdForOriginalSender });
-            }
-            sentMessage = await ctx.telegram.sendVideoNote(originalSenderId, message.video_note.file_id);
-        } else if (message.sticker) {
-            if (caption && caption !== baseText) {
-                await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: replyToMessageIdForOriginalSender });
-            }
-            sentMessage = await ctx.telegram.sendSticker(originalSenderId, message.sticker.file_id);
-        } else if (message.poll) {
-            const question = message.poll.question;
-            const options = message.poll.options.map(o => o.text);
-            await ctx.telegram.sendMessage(originalSenderId, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: replyToMessageIdForOriginalSender });
-            sentMessage = await ctx.telegram.sendPoll(originalSenderId, question, options, {
-                is_anonymous: message.poll.is_anonymous,
-                type: message.poll.type,
-                allows_multiple_answers: message.poll.allows_multiple_answers
-            });
-        } else {
-            await ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения для анонимного ответа. Пожалуйста, попробуйте другой тип.", { reply_to_message_id: ctx.message.message_id });
-            return;
-        }
-
-        await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { reply_to_message_id: ctx.message.message_id, parse_mode: 'Markdown' });
-        await ctx.scene.leave();
-    } catch (e) {
-        console.error(`[Bot] Ошибка отправки ответного сообщения от ${replierId} к ${originalSenderId}:`, e.message);
-        await ctx.reply(
-            `⚠️❌ Произошла ошибка при отправке ответного сообщения: \`${e.message}\`\n\n` +
-            `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
-            { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
-        );
-    }
-});
-
-replyScene.action('cancel', async (ctx) => {
-    await ctx.answerCbQuery("Действие отменено!");
-    if (ctx.callbackQuery.message) {
-        await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
-    }
-    await ctx.scene.leave();
-});
-// Создаем менеджер сцен
-const stage = new Scenes.Stage([sendScene, replyScene]);
-
-// Регистрируем middleware для сессий и сцен
 bot.use(session());
 bot.use(stage.middleware());
 
@@ -285,8 +171,6 @@ bot.use(async (ctx, next) => {
     cooldowns.set(userId, now);
     return next();
 });
-
-
 // --- Обработчики команд ---
 
 bot.start(async (ctx) => {
@@ -388,7 +272,7 @@ bot.command('help', async (ctx) => {
     await ctx.reply("Помощь будет", { reply_to_message_id: ctx.message.message_id });
 });
 
-// Обработка callback_query для кнопки "Написать еще"
+// ОБРАБОТЧИК: Обработка callback_query для кнопки "Написать еще"
 bot.action(/^again_(.+)$/, async (ctx) => {
     const userIdToSend = ctx.match[1];
     await ctx.answerCbQuery();
@@ -397,18 +281,6 @@ bot.action(/^again_(.+)$/, async (ctx) => {
     }
     await ctx.scene.enter('sendScene', { user: userIdToSend });
 });
-
-// ОБРАБОТЧИК: Обработка callback_query для кнопки "Ответить"
-bot.action(/^reply_to_sender_(.+)$/, async (ctx) => {
-    const originalSenderId = ctx.match[1];
-    await ctx.answerCbQuery('Подготовка к ответу...');
-    if (ctx.callbackQuery.message) {
-        await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
-    }
-    // Переходим в сцену ответа, передавая ID оригинального отправителя
-    ctx.scene.enter('replyScene', { originalSender: originalSenderId, repliedToMessageId: ctx.callbackQuery.message.message_id });
-});
-
 
 // ОБРАБОТЧИК: Блокировка пользователя
 bot.action(/^block_user_(.+)_from_(.+)$/, async (ctx) => {
@@ -431,15 +303,121 @@ bot.action(/^block_user_(.+)_from_(.+)$/, async (ctx) => {
 });
 
 
-// Общий обработчик текстовых сообщений (если не попал ни в одну команду/FSM)
-bot.on('text', async (ctx) => {
-    await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.', { reply_to_message_id: ctx.message.message_id });
-});
-
-// Обработка любых других типов сообщений, не обработанных FSM
+// НОВЫЙ ОБРАБОТЧИК: Обработка сообщений, которые являются ответами на сообщения бота
 bot.on('message', async (ctx) => {
+    // Проверяем, является ли сообщение ответом на сообщение бота
+    if (ctx.message.reply_to_message && ctx.message.reply_to_message.from.id === bot.botInfo.id) {
+        const repliedToBotMessageId = ctx.message.reply_to_message.message_id;
+        const currentChatId = ctx.chat.id;
+
+        // Пытаемся получить контекст анонимного сообщения
+        const anonContext = await getAnonMessageContext(repliedToBotMessageId, currentChatId);
+
+        if (anonContext) {
+            const originalSenderId = anonContext.original_sender_id;
+            const originalSenderMessageId = anonContext.original_sender_message_id; // Используем ID оригинального сообщения отправителя
+            const replierId = ctx.from.id; // Тот, кто отвечает (текущий пользователь)
+            const message = ctx.message;
+            const baseText = "✉️ *Пришло анонимное ответное сообщение!*\n\n";
+            const caption = message.caption ? baseText + message.caption : baseText;
+            const replyMarkup = anonymousMessageButtons(replierId, originalSenderId).reply_markup; // Кнопка Заблокировать
+
+            // Проверяем, не заблокировал ли оригинальный отправитель отвечающего
+            const isBlocked = await isUserBlocked(originalSenderId, replierId);
+            if (isBlocked) {
+                await ctx.reply(`🚫 Вы не можете отправить ответ этому пользователю, так как он вас заблокировал.`, { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" });
+                return;
+            }
+
+            try {
+                await addMessageCounts(replierId, originalSenderId);
+
+                // Пересоздаем сообщение для анонимности
+                if (message.text) {
+                    await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, {
+                        parse_mode: "Markdown",
+                        reply_markup: replyMarkup,
+                        reply_to_message_id: originalSenderMessageId // Имитация ответа на первое сообщение отправителя
+                    });
+                } else if (message.photo) {
+                    await ctx.telegram.sendPhoto(originalSenderId, message.photo[message.photo.length - 1].file_id, {
+                        caption: caption,
+                        parse_mode: "Markdown",
+                        reply_markup: replyMarkup,
+                        reply_to_message_id: originalSenderMessageId
+                    });
+                } else if (message.video) {
+                    await ctx.telegram.sendVideo(originalSenderId, message.video.file_id, {
+                        caption: caption,
+                        parse_mode: "Markdown",
+                        reply_markup: replyMarkup,
+                        reply_to_message_id: originalSenderMessageId
+                    });
+                } else if (message.document) {
+                    await ctx.telegram.sendDocument(originalSenderId, message.document.file_id, {
+                        caption: caption,
+                        parse_mode: "Markdown",
+                        reply_markup: replyMarkup,
+                        reply_to_message_id: originalSenderMessageId
+                    });
+                } else if (message.audio) {
+                    await ctx.telegram.sendAudio(originalSenderId, message.audio.file_id, {
+                        caption: caption,
+                        parse_mode: "Markdown",
+                        reply_markup: replyMarkup,
+                        reply_to_message_id: originalSenderMessageId
+                    });
+                } else if (message.voice) {
+                    await ctx.telegram.sendVoice(originalSenderId, message.voice.file_id, {
+                        caption: caption,
+                        parse_mode: "Markdown",
+                        reply_markup: replyMarkup,
+                        reply_to_message_id: originalSenderMessageId
+                    });
+                } else if (message.video_note) {
+                    if (caption && caption !== baseText) {
+                        await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: originalSenderMessageId });
+                    }
+                    await ctx.telegram.sendVideoNote(originalSenderId, message.video_note.file_id);
+                } else if (message.sticker) {
+                    if (caption && caption !== baseText) {
+                        await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: originalSenderMessageId });
+                    }
+                    await ctx.telegram.sendSticker(originalSenderId, message.sticker.file_id);
+                } else if (message.poll) {
+                    const question = message.poll.question;
+                    const options = message.poll.options.map(o => o.text);
+                    await ctx.telegram.sendMessage(originalSenderId, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: originalSenderMessageId });
+                    await ctx.telegram.sendPoll(originalSenderId, question, options, {
+                        is_anonymous: message.poll.is_anonymous,
+                        type: message.poll.type,
+                        allows_multiple_answers: message.poll.allows_multiple_answers
+                    });
+                } else {
+                    await ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения для анонимного ответа. Пожалуйста, попробуйте другой тип.", { reply_to_message_id: ctx.message.message_id });
+                    return;
+                }
+
+                await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { reply_to_message_id: ctx.message.message_id, parse_mode: 'Markdown' });
+                return; // Важно, чтобы сообщение было обработано здесь и не попало в общий обработчик
+            } catch (e) {
+                console.error(`[Bot] Ошибка отправки ответного сообщения от ${replierId} к ${originalSenderId}:`, e.message);
+                await ctx.reply(
+                    `⚠️❌ Произошла ошибка при отправке ответного сообщения: \`${e.message}\`\n\n` +
+                    `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
+                    { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" }
+                );
+                return;
+            }
+        }
+    }
+
+    // Если сообщение не является ответом на сообщение бота, или контекст не найден,
+    // обрабатываем его как обычный текст или неподдерживаемый тип
     const handledByScene = ctx.session && ctx.session.__scenes && ctx.session.__scenes.current;
-    if (!handledByScene && !ctx.message.text && !ctx.message.caption && !ctx.message.photo && !ctx.message.video && !ctx.message.document && !ctx.message.audio && !ctx.message.voice && !ctx.message.video_note && !ctx.message.sticker && !ctx.message.poll) {
+    if (!handledByScene && ctx.message.text) {
+        await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.', { reply_to_message_id: ctx.message.message_id });
+    } else if (!handledByScene) { // Если не текст и не сцена
         await ctx.reply('Я не понял ваш запрос. Пожалуйста, используйте команды из меню или отправьте поддерживаемый тип сообщения.', { reply_to_message_id: ctx.message.message_id });
     }
 });
@@ -475,6 +453,11 @@ const startBot = async () => {
     bot.launch()
         .then(() => {
             console.log('✅ Telegraf бот запущен в режиме Long Polling.');
+            // Получаем информацию о боте после запуска, чтобы использовать bot.botInfo.id
+            bot.telegram.getMe().then(botInfo => {
+                bot.botInfo = botInfo;
+                console.log(`[Bot Info] Бот запущен как @${botInfo.username}`);
+            });
         })
         .catch(err => {
             console.error('❌ Ошибка при запуске Telegraf бота:', err);
@@ -493,3 +476,4 @@ process.once('SIGTERM', async () => {
     console.log('Получен сигнал SIGTERM. Остановка бота...');
     await bot.stop('SIGTERM');
 });
+                        
