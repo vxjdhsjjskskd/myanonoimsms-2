@@ -61,15 +61,33 @@ dp = Dispatcher()
 # например: rt = Router()
 dp.include_routers(commands.rt, handlers.rt)
 
+# == ОБРАБОТЧИК WEBHOOK ==
+# Это функция, которая будет принимать POST-запросы от Telegram
+async def handle_webhook(request: web.Request):
+    """
+    Обработчик входящих вебхук-запросов от Telegram.
+    Передает обновление диспетчеру для обработки.
+    """
+    url = str(request.url)
+    if url.endswith(WEBHOOK_PATH):
+        update = web.json_response(await request.json())
+        # Обрабатываем обновление через диспетчер
+        await dp.feed_update(bot, update) # <-- ОСНОВНОЙ МЕТОД ОБРАБОТКИ ОБНОВЛЕНИЙ
+        return web.Response(status=200)
+    else:
+        # Если URL не соответствует, возвращаем 404
+        return web.Response(status=404)
+
+
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
+async def on_startup_webhook(app: web.Application):
     """
-    Функция, выполняемая при запуске бота.
+    Функция, выполняемая при запуске aiohttp приложения.
     Здесь происходит подключение к БД и установка вебхука.
     """
     logger.info("Starting bot and setting webhook...")
-
+    
     # Подключение к MongoDB Atlas
     try:
         logger.info("Connecting to MongoDB Atlas...")
@@ -77,7 +95,8 @@ async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
         logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
         logger.exception(f"Failed to connect to MongoDB Atlas: {e}")
-        raise # Если подключение к БД критично, можно прервать запуск
+        # Если подключение к БД критично, можно прервать запуск
+        raise
 
     # Устанавливаем вебхук на Telegram API
     # drop_pending_updates=True очищает все накопившиеся обновления
@@ -85,9 +104,9 @@ async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown_webhook(dispatcher: Dispatcher, bot: Bot):
+async def on_shutdown_webhook(app: web.Application):
     """
-    Функция, выполняемая при остановке бота.
+    Функция, выполняемая при остановке aiohttp приложения.
     Здесь удаляется вебхук и закрывается сессия бота.
     """
     logger.info("Shutting down bot and deleting webhook...")
@@ -102,23 +121,23 @@ async def main():
     """
     Главная асинхронная функция, которая запускает бота как веб-сервис.
     """
-    # Регистрируем функции on_startup и on_shutdown
-    # Эти функции будут вызваны aiogram перед запуском и после остановки веб-сервера.
-    dp.startup.register(on_startup_webhook)
-    dp.shutdown.register(on_shutdown_webhook)
+    # Создаем aiohttp.web.Application
+    web_app = web.Application()
 
-    # aiogram 3.x предоставляет специальный объект 'web_app' в диспетчере
-    # который является aiohttp.web.Application, готовым к запуску.
+    # Регистрируем обработчик вебхуков
+    web_app.router.add_post(WEBHOOK_PATH, handle_webhook)
+
+    # Регистрируем функции запуска и остановки aiohttp приложения
+    web_app.on_startup.append(on_startup_webhook)
+    web_app.on_shutdown.append(on_shutdown_webhook)
+
     logger.info(f"Starting web server for webhook on port {PORT}...")
     try:
-        # Используем run_app напрямую из aiohttp.web, передавая
-        # aiogram's web_app (которая уже содержит все нужные роуты)
-        # и настройки хоста/порта.
-        await web.run_app(
-            dp.web_app, # <-- Это магический объект aiogram
-            host='0.0.0.0',
-            port=PORT
-        )
+        # Запускаем aiohttp веб-сервер
+        # Он будет слушать на всех интерфейсах (0.0.0.0) и на указанном порту
+        await web._run_app(web_app, host='0.0.0.0', port=PORT) # <-- ИСПОЛЬЗУЕМ web._run_app
+                                                           # (с подчеркиванием, это внутренняя функция,
+                                                           # но она наиболее стабильна для прямого запуска)
     except asyncio.CancelledError:
         logger.info("Application stopped by CancelledError.")
     except Exception as e:
