@@ -12,9 +12,6 @@ import asyncio
 import logging
 import os
 
-# Импортируем SimpleRequestHandler для обработки вебхуков
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-
 # Конфигурация логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -64,10 +61,33 @@ dp = Dispatcher()
 # например: rt = Router()
 dp.include_routers(commands.rt, handlers.rt)
 
+# == ОБРАБОТЧИК WEBHOOK (САМЫЙ БАЗОВЫЙ) ==
+async def handle_webhook_request(request: web.Request):
+    """
+    Обрабатывает входящие POST-запросы от Telegram.
+    Это низкоуровневый обработчик, который передает сырые данные в диспетчер.
+    """
+    if str(request.url).endswith(WEBHOOK_PATH):
+        try:
+            # Получаем сырые JSON-данные из тела запроса
+            update_data = await request.json()
+            
+            # Передаем сырые данные в диспетчер aiogram для обработки
+            # Диспетчер сам десериализует их в объект Update и вызывает хэндлеры
+            await dp.feed_raw_update(update_data)
+            
+            return web.Response(status=200) # Telegram ожидает 200 OK
+        except Exception as e:
+            logger.exception(f"Error processing webhook update: {e}")
+            return web.Response(status=500) # Возвращаем 500 в случае ошибки
+    else:
+        logger.warning(f"Received request on unexpected path: {request.url}")
+        return web.Response(status=404) # Неправильный путь вебхука
 
-# == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup_webhook(app: web.Application):
+# == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ AIOHTTP ПРИЛОЖЕНИЯ ==
+
+async def on_startup_app(app: web.Application):
     """
     Функция, выполняемая при запуске aiohttp приложения.
     Здесь происходит подключение к БД и установка вебхука.
@@ -81,8 +101,7 @@ async def on_startup_webhook(app: web.Application):
         logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
         logger.exception(f"Failed to connect to MongoDB Atlas: {e}")
-        # Если подключение к БД критично, можно прервать запуск
-        raise
+        raise # Если подключение к БД критично, можно прервать запуск
 
     # Устанавливаем вебхук на Telegram API
     # drop_pending_updates=True очищает все накопившиеся обновления
@@ -90,7 +109,7 @@ async def on_startup_webhook(app: web.Application):
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown_webhook(app: web.Application):
+async def on_shutdown_app(app: web.Application):
     """
     Функция, выполняемая при остановке aiohttp приложения.
     Здесь удаляется вебхук и закрывается сессия бота.
@@ -110,21 +129,12 @@ async def main():
     # Создаем aiohttp.web.Application
     web_app = web.Application()
 
-    # Регистрируем функции запуска и остановки aiohttp приложения
-    # ИСПРАВЛЕНО: Регистрируем on_startup_webhook и on_shutdown_webhook
-    # непосредственно в web_app, а не в dp.
-    web_app.on_startup.append(on_startup_webhook)
-    web_app.on_shutdown.append(on_shutdown_webhook)
+    # Добавляем маршрут для обработки вебхуков
+    web_app.router.add_post(WEBHOOK_PATH, handle_webhook_request)
 
-    # Настраиваем SimpleRequestHandler для обработки вебхуков
-    # Он сам позаботится о передаче обновлений в диспетчер
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        process_timeout=30 # Таймаут обработки обновления
-    )
-    # Добавляем маршрут для вебхука
-    webhook_requests_handler.register(web_app.router, path=WEBHOOK_PATH)
+    # Регистрируем функции запуска и остановки для aiohttp приложения
+    web_app.on_startup.append(on_startup_app)
+    web_app.on_shutdown.append(on_shutdown_app)
 
     logger.info(f"Starting web server for webhook on port {PORT}...")
     try:
