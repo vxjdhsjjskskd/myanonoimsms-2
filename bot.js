@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 // Импортируем сервисы базы данных и клавиатуры
 import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick, updateUserCode } from './dbService.js';
-import { cancelKeyboard, sendAgainKeyboard, replyToSenderKeyboard } from './keyboards.js'; // Импортируем новую клавиатуру
+import { cancelKeyboard, sendAgainKeyboard, replyToSenderKeyboard } from './keyboards.js';
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -257,14 +257,17 @@ bot.command('url', async (ctx) => {
     const botInfo = await ctx.telegram.getMe();
     const link = `https://t.me/${botInfo.username}?start=${userCode}`;
 
-    await ctx.reply(
+    await ctx.reply( // ИЗМЕНЕНО: Убрано .extra() и передано parse_mode напрямую
         `🔗 *Ваша текущая ссылка:*\n👉 \`${link}\`\n\n` +
         `Вы можете разместить ее в описании профиля.\n\n` +
         `Если вы хотите *сгенерировать новую ссылку*, нажмите кнопку ниже. ` +
         `Ваша старая ссылка перестанет работать.`,
-        Markup.inlineKeyboard([
-            Markup.button.callback('Сгенерировать новую ссылку', 'generate_new_link')
-        ]).extra({ parse_mode: 'Markdown' })
+        {
+            reply_markup: Markup.inlineKeyboard([
+                Markup.button.callback('Сгенерировать новую ссылку', 'generate_new_link')
+            ]).reply_markup, // Используем .reply_markup для получения объекта клавиатуры
+            parse_mode: 'Markdown'
+        }
     );
 });
 
