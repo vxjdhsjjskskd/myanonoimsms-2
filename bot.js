@@ -70,7 +70,6 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
         } else if (message.voice) {
             await ctx.telegram.sendVoice(userIdToSend, message.voice.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.video_note) {
-            // Video notes and stickers don't support captions directly with reply_markup, send text separately
             if (caption && caption !== baseText) {
                 await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
             }
@@ -125,9 +124,14 @@ replyScene.enter(async (ctx) => {
     await ctx.reply('👉 Введите ваше анонимное ответное сообщение.', { reply_markup: cancelKeyboard().reply_markup });
 });
 
+// ИЗМЕНЕНО: Обработчик для пересылки сообщения (теперь пересоздает его для анонимности)
 replyScene.on('message', async (ctx) => {
     const originalSenderId = ctx.scene.state.originalSender; // Оригинальный отправитель
     const replierId = ctx.from.id; // Текущий пользователь, который отвечает
+    const message = ctx.message;
+    const baseText = "✉️ *Пришло анонимное ответное сообщение!*\n\n";
+    const caption = message.caption ? baseText + message.caption : baseText;
+    const replyMarkup = replyToSenderKeyboard(replierId).reply_markup; // Кнопка ответа для оригинального отправителя
 
     if (!originalSenderId) {
         await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown' });
@@ -135,11 +139,45 @@ replyScene.on('message', async (ctx) => {
     }
 
     try {
-        // Пересылаем сообщение от отвечающего к оригинальному отправителю
-        await ctx.telegram.forwardMessage(originalSenderId, ctx.chat.id, ctx.message.message_id);
-        
         // Обновляем счетчики: replier отправляет, originalSenderId получает
         await addMessageCounts(replierId, originalSenderId);
+
+        // Пересоздаем сообщение вместо пересылки для анонимности
+        if (message.text) {
+            await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, { parse_mode: "Markdown", reply_markup: replyMarkup });
+        } else if (message.photo) {
+            await ctx.telegram.sendPhoto(originalSenderId, message.photo[message.photo.length - 1].file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+        } else if (message.video) {
+            await ctx.telegram.sendVideo(originalSenderId, message.video.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+        } else if (message.document) {
+            await ctx.telegram.sendDocument(originalSenderId, message.document.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+        } else if (message.audio) {
+            await ctx.telegram.sendAudio(originalSenderId, message.audio.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+        } else if (message.voice) {
+            await ctx.telegram.sendVoice(originalSenderId, message.voice.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
+        } else if (message.video_note) {
+            if (caption && caption !== baseText) {
+                await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
+            }
+            await ctx.telegram.sendVideoNote(originalSenderId, message.video_note.file_id);
+        } else if (message.sticker) {
+            if (caption && caption !== baseText) {
+                await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
+            }
+            await ctx.telegram.sendSticker(originalSenderId, message.sticker.file_id);
+        } else if (message.poll) {
+            const question = message.poll.question;
+            const options = message.poll.options.map(o => o.text);
+            await ctx.telegram.sendMessage(originalSenderId, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup });
+            await ctx.telegram.sendPoll(originalSenderId, question, options, {
+                is_anonymous: message.poll.is_anonymous,
+                type: message.poll.type,
+                allows_multiple_answers: message.poll.allows_multiple_answers
+            });
+        } else {
+            await ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения для анонимного ответа. Пожалуйста, попробуйте другой тип.");
+            return ctx.scene.leave(); // Выходим из сцены, если тип не поддерживается
+        }
 
         await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { parse_mode: 'Markdown' });
         await ctx.scene.leave();
@@ -163,7 +201,7 @@ replyScene.action('cancel', async (ctx) => {
 
 
 // Создаем менеджер сцен
-const stage = new Scenes.Stage([sendScene, replyScene]); // Добавляем replyScene
+const stage = new Scenes.Stage([sendScene, replyScene]);
 
 // Регистрируем middleware для сессий и сцен
 bot.use(session());
@@ -257,7 +295,7 @@ bot.command('url', async (ctx) => {
     const botInfo = await ctx.telegram.getMe();
     const link = `https://t.me/${botInfo.username}?start=${userCode}`;
 
-    await ctx.reply( // ИЗМЕНЕНО: Убрано .extra() и передано parse_mode напрямую
+    await ctx.reply(
         `🔗 *Ваша текущая ссылка:*\n👉 \`${link}\`\n\n` +
         `Вы можете разместить ее в описании профиля.\n\n` +
         `Если вы хотите *сгенерировать новую ссылку*, нажмите кнопку ниже. ` +
@@ -265,7 +303,7 @@ bot.command('url', async (ctx) => {
         {
             reply_markup: Markup.inlineKeyboard([
                 Markup.button.callback('Сгенерировать новую ссылку', 'generate_new_link')
-            ]).reply_markup, // Используем .reply_markup для получения объекта клавиатуры
+            ]).reply_markup,
             parse_mode: 'Markdown'
         }
     );
@@ -380,3 +418,4 @@ process.once('SIGTERM', async () => {
     await bot.stop('SIGTERM'); // Останавливаем Telegraf бота
     // MongoDB соединение будет закрыто в index.js
 });
+                                
