@@ -2,107 +2,100 @@ import { User } from './userModel.js';
 import crypto from 'crypto'; // Для генерации уникального кода
 
 // Функция для добавления нового пользователя или получения существующего
-// Соответствует set_user из Python
-async function setUser(chatId) {
+async function setUser(tgId) {
     try {
-        let user = await User.findOne({ chatId: chatId });
+        let user = await User.findOne({ tg_id: tgId });
         if (!user) {
-            // Генерируем уникальный код для нового пользователя
             const userCode = crypto.randomBytes(5).toString('hex').toUpperCase(); // 10 символов (5 байт * 2 hex)
+            // ИЗМЕНЕНО: Передаем tg_id и code в конструктор User сразу
             user = new User({
-                chatId: chatId,
-                userCode: userCode,
-                receivedMessagesCount: 0,
-                sentMessagesCount: 0,
+                tg_id: tgId, // <-- Обязательное поле
+                code: userCode, // <-- Обязательное поле
+                message_get: 0,
+                message_count: 0,
+                linkClicksCount: 0,
                 lastInteraction: new Date()
             });
             await user.save();
-            console.log(`[DB] Новый пользователь ${chatId} добавлен с кодом ${userCode}`);
+            console.log(`[DB] Добавлен новый пользователь: ${tgId}, код: ${userCode}`);
         } else {
-            // Обновляем дату последнего взаимодействия
-            user.lastInteraction = new Date();
+            user.lastInteraction = new Date(); // Обновляем дату последнего взаимодействия
             await user.save();
-            console.log(`[DB] Пользователь ${chatId} обновлен (lastInteraction).`);
         }
         return user;
     } catch (error) {
-        console.error(`[DB] Ошибка в setUser для ${chatId}:`, error);
-        throw error; // Перебрасываем ошибку для обработки выше
+        console.error(`[DB] Ошибка в setUser для ${tgId}:`, error.message);
+        throw error;
     }
 }
 
 // Функция для получения уникального кода пользователя
-// Соответствует get_code из Python
-async function getUserCode(chatId) {
+async function getUserCode(tgId) {
     try {
-        const user = await User.findOne({ chatId: chatId });
-        if (!user) {
-            // Если пользователь не найден, можно создать его или вернуть null/ошибку
-            // В данном случае, если код запрашивается, пользователь должен существовать
-            console.warn(`[DB] Код запрошен для несуществующего пользователя ${chatId}.`);
-            return null;
-        }
-        return user.userCode;
+        const user = await User.findOne({ tg_id: tgId });
+        return user ? user.code : null;
     } catch (error) {
-        console.error(`[DB] Ошибка в getUserCode для ${chatId}:`, error);
+        console.error(`[DB] Ошибка в getUserCode для ${tgId}:`, error.message);
         throw error;
     }
 }
 
 // Функция для получения Telegram ID пользователя по его уникальному коду
-// Соответствует get_user из Python
-async function getChatIdByCode(userCode) {
+async function getTgIdByCode(userCode) {
     try {
-        const user = await User.findOne({ userCode: userCode });
-        if (!user) {
-            console.warn(`[DB] Пользователь с кодом ${userCode} не найден.`);
-            return null; // Возвращаем null, если пользователь не найден
-        }
-        return user.chatId;
+        const user = await User.findOne({ code: userCode });
+        return user ? user.tg_id : null;
     } catch (error) {
-        console.error(`[DB] Ошибка в getChatIdByCode для кода ${userCode}:`, error);
+        console.error(`[DB] Ошибка в getTgIdByCode для кода ${userCode}:`, error.message);
         throw error;
     }
 }
 
 // Функция для получения статистики сообщений пользователя
-// Соответствует get_messages из Python
-async function getMessageCounts(chatId) {
+async function getMessageCounts(tgId) {
     try {
-        const user = await User.findOne({ chatId: chatId });
+        const user = await User.findOne({ tg_id: tgId });
         if (!user) {
-            console.warn(`[DB] Статистика запрошена для несуществующего пользователя ${chatId}.`);
-            return { received: 0, sent: 0 };
+            return { received: 0, sent: 0, linkClicks: 0 };
         }
         return {
-            received: user.receivedMessagesCount,
-            sent: user.sentMessagesCount
+            received: user.message_get,
+            sent: user.message_count,
+            linkClicks: user.linkClicksCount || 0
         };
     } catch (error) {
-        console.error(`[DB] Ошибка в getMessageCounts для ${chatId}:`, error);
+        console.error(`[DB] Ошибка в getMessageCounts для ${tgId}:`, error.message);
         throw error;
     }
 }
 
 // Функция для обновления счетчиков отправленных и полученных сообщений
-// Соответствует add_messages_count из Python
 async function addMessageCounts(senderId, receiverId) {
     try {
-        // Обновляем счетчик отправленных сообщений для отправителя
         await User.updateOne(
-            { chatId: senderId },
-            { $inc: { sentMessagesCount: 1 }, $set: { lastInteraction: new Date() } }
+            { tg_id: senderId },
+            { $inc: { message_count: 1 }, $set: { lastInteraction: new Date() } }
         );
-        console.log(`[DB] Счетчик отправленных сообщений для ${senderId} увеличен.`);
-
-        // Обновляем счетчик полученных сообщений для получателя
         await User.updateOne(
-            { chatId: receiverId },
-            { $inc: { receivedMessagesCount: 1 }, $set: { lastInteraction: new Date() } }
+            { tg_id: receiverId },
+            { $inc: { message_get: 1 }, $set: { lastInteraction: new Date() } }
         );
-        console.log(`[DB] Счетчик полученных сообщений для ${receiverId} увеличен.`);
     } catch (error) {
-        console.error(`[DB] Ошибка в addMessageCounts для отправителя ${senderId} и получателя ${receiverId}:`, error);
+        console.error(`[DB] Ошибка в addMessageCounts для отправителя ${senderId} и получателя ${receiverId}:`, error.message);
+        throw error;
+    }
+}
+
+// Новая функция для увеличения счетчика переходов по ссылке
+async function addLinkClick(tgId) {
+    try {
+        await User.updateOne(
+            { tg_id: tgId },
+            { $inc: { linkClicksCount: 1 }, $set: { lastInteraction: new Date() } }
+        );
+        console.log(`[DB] Увеличен счетчик переходов по ссылке для пользователя: ${tgId}`);
+    } catch (error) {
+        console.error(`[DB] Ошибка в addLinkClick для ${tgId}:`, error.message);
         throw error;
     }
 }
@@ -110,7 +103,8 @@ async function addMessageCounts(senderId, receiverId) {
 export {
     setUser,
     getUserCode,
-    getChatIdByCode,
+    getTgIdByCode,
     getMessageCounts,
-    addMessageCounts
+    addMessageCounts,
+    addLinkClick
 };
