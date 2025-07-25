@@ -7,6 +7,7 @@
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiohttp import web # Убедитесь, что aiohttp установлен (в requirements.txt)
 import asyncio
 import logging
 import os
@@ -62,10 +63,10 @@ dp.include_routers(commands.rt, handlers.rt)
 
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup_webhook(bot: Bot):
+async def on_startup(bot: Bot):
     """
     Функция, выполняемая при запуске бота.
-    Здесь устанавливается вебхук и происходит подключение к БД.
+    Здесь происходит подключение к БД и установка вебхука.
     """
     logger.info("Starting bot and setting webhook...")
     
@@ -76,14 +77,15 @@ async def on_startup_webhook(bot: Bot):
         logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
         logger.exception(f"Failed to connect to MongoDB Atlas: {e}")
-        raise # Если критично, чтобы бот не работал без БД
+        raise # Если подключение к БД критично, можно прервать запуск
 
     # Устанавливаем вебхук на Telegram API
+    # drop_pending_updates=True очищает все накопившиеся обновления
     await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown_webhook(bot: Bot):
+async def on_shutdown(bot: Bot):
     """
     Функция, выполняемая при остановке бота.
     Здесь удаляется вебхук и закрывается сессия бота.
@@ -101,21 +103,30 @@ async def main():
     Главная асинхронная функция, которая запускает бота как веб-сервис.
     """
     
-    # Запуск бота в режиме вебхуков
-    # aiogram сам создаст aiohttp веб-приложение и запустит его.
-    # Мы передаем ему URL для вебхука, а также функции, которые должны
-    # быть вызваны при старте и остановке.
-    logger.info(f"Starting bot in webhook mode on port {PORT}...")
-    await dp.start_webhook(
-        bot=bot,
-        webhook_url=WEBHOOK_URL,
-        on_startup=on_startup_webhook,
-        on_shutdown=on_shutdown_webhook,
-        # Веб-сервер будет слушать на всех интерфейсах (0.0.0.0) и на указанном порту
-        web_server_host='0.0.0.0',
-        web_server_port=PORT
-    )
-    logger.info("Bot stopped.")
+    # Регистрация функций on_startup и on_shutdown
+    # Это важно, так как они будут вызваны aiogram
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+
+    # Запуск веб-сервера aiohttp и обработка вебхуков
+    # aiogram 3.x использует web.run_app для запуска веб-сервера
+    # с встроенной логикой обработки вебхуков.
+    logger.info(f"Starting web server for webhook on port {PORT}...")
+    try:
+        await dp.start_polling( # Используем start_polling для интеграции с aiohttp.web_app
+            bot,
+            webhook_url=WEBHOOK_URL,
+            # Создаем aiohttp.web.Application для aiogram
+            web_app_factory=lambda: web.Application(),
+            web_server_host='0.0.0.0',
+            web_server_port=PORT
+        )
+    except asyncio.CancelledError:
+        logger.info("Application stopped by CancelledError.")
+    except Exception as e:
+        logger.exception(f"An error occurred during webhook startup: {e}")
+    finally:
+        logger.info("Bot stopped.")
 
 
 if __name__ == "__main__":
