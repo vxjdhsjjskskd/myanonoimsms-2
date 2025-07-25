@@ -12,6 +12,9 @@ import asyncio
 import logging
 import os
 
+# Импортируем SimpleRequestHandler для обработки вебхуков
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
 # Конфигурация логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -61,35 +64,10 @@ dp = Dispatcher()
 # например: rt = Router()
 dp.include_routers(commands.rt, handlers.rt)
 
-# == ОБРАБОТЧИК WEBHOOK ==
-# Это функция, которая будет принимать POST-запросы от Telegram
-async def handle_webhook(request: web.Request):
-    """
-    Обработчик входящих вебхук-запросов от Telegram.
-    Передает обновление диспетчеру для обработки.
-    """
-    url = str(request.url)
-    if url.endswith(WEBHOOK_PATH):
-        try:
-            # Получаем JSON-тело запроса
-            update_json = await request.json()
-            
-            # Передаем JSON-данные в диспетчер для обработки.
-            # Aiogram сам десериализует их в объект Update.
-            await dp.feed_raw_update(update_json) # <-- ИСПРАВЛЕНО: ИСПОЛЬЗУЕМ feed_raw_update
-
-            return web.Response(status=200)
-        except Exception as e:
-            logger.error(f"Error processing webhook update: {e}", exc_info=True)
-            return web.Response(status=500) # Возвращаем 500 в случае ошибки
-    else:
-        # Если URL не соответствует, возвращаем 404
-        return web.Response(status=404)
-
 
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup_webhook(app: web.Application):
+async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
     """
     Функция, выполняемая при запуске aiohttp приложения.
     Здесь происходит подключение к БД и установка вебхука.
@@ -112,7 +90,7 @@ async def on_startup_webhook(app: web.Application):
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown_webhook(app: web.Application):
+async def on_shutdown_webhook(dispatcher: Dispatcher, bot: Bot):
     """
     Функция, выполняемая при остановке aiohttp приложения.
     Здесь удаляется вебхук и закрывается сессия бота.
@@ -132,12 +110,19 @@ async def main():
     # Создаем aiohttp.web.Application
     web_app = web.Application()
 
-    # Регистрируем обработчик вебхуков
-    web_app.router.add_post(WEBHOOK_PATH, handle_webhook)
-
-    # Регистрируем функции запуска и остановки aiohttp приложения
+    # Регистрируем функции запуска и остановки в aiohttp приложении
     web_app.on_startup.append(on_startup_webhook)
     web_app.on_shutdown.append(on_shutdown_webhook)
+
+    # Настраиваем SimpleRequestHandler для обработки вебхуков
+    # Он сам позаботится о передаче обновлений в диспетчер
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        process_timeout=30 # Таймаут обработки обновления
+    )
+    # Добавляем маршрут для вебхука
+    webhook_requests_handler.register(web_app.router, path=WEBHOOK_PATH)
 
     logger.info(f"Starting web server for webhook on port {PORT}...")
     try:
