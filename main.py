@@ -67,7 +67,7 @@ dp.include_routers(commands.rt, handlers.rt)
 
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
+async def on_startup_webhook(app: web.Application):
     """
     Функция, выполняемая при запуске aiohttp приложения.
     Здесь происходит подключение к БД и установка вебхука.
@@ -90,7 +90,7 @@ async def on_startup_webhook(dispatcher: Dispatcher, bot: Bot):
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown_webhook(dispatcher: Dispatcher, bot: Bot):
+async def on_shutdown_webhook(app: web.Application):
     """
     Функция, выполняемая при остановке aiohttp приложения.
     Здесь удаляется вебхук и закрывается сессия бота.
@@ -110,7 +110,9 @@ async def main():
     # Создаем aiohttp.web.Application
     web_app = web.Application()
 
-    # Регистрируем функции запуска и остановки в aiohttp приложении
+    # Регистрируем функции запуска и остановки aiohttp приложения
+    # ИСПРАВЛЕНО: Регистрируем on_startup_webhook и on_shutdown_webhook
+    # непосредственно в web_app, а не в dp.
     web_app.on_startup.append(on_startup_webhook)
     web_app.on_shutdown.append(on_shutdown_webhook)
 
