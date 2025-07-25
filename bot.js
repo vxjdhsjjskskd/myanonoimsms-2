@@ -2,21 +2,19 @@ import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import dotenv from 'dotenv';
 
 // Импортируем модель пользователя и сервисы базы данных
-import { User } from './userModel.js'; // Хотя User импортируется в dbService, оставлю здесь для ясности
-import { setUser, getUserCode, getChatIdByCode, getMessageCounts, addMessageCounts } from './dbService.js';
+// ИЗМЕНЕНО: getChatIdByCode -> getTgIdByCode
+import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick } from './dbService.js';
 import { cancelKeyboard, sendAgainKeyboard } from './keyboards.js';
 
 // Загружаем переменные окружения
 dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-export const bot = new Telegraf(BOT_TOKEN); // Экспортируем инстанс бота
+export const bot = new Telegraf(BOT_TOKEN);
 
 // --- FSM (Finite State Machine) - Сцены и состояния ---
-// Определяем сцену для отправки сообщений
 const sendScene = new Scenes.BaseScene('sendScene');
 
-// Состояние для ожидания кода/сообщения
 sendScene.enter(async (ctx) => {
     await ctx.reply(
         "👉 Введите сообщение, которое хотите отправить.\n\n" +
@@ -25,19 +23,18 @@ sendScene.enter(async (ctx) => {
     );
 });
 
-// Обработчик для текстовых сообщений в состоянии Send.code
 sendScene.on('text', async (ctx) => {
-    const userIdToSend = ctx.scene.state.user; // Получаем ID получателя из состояния сцены
+    const userIdToSend = ctx.scene.state.user;
     const senderId = ctx.from.id;
 
     try {
-        await addMessageCounts(senderId, userIdToSend); // Обновляем счетчики
+        await addMessageCounts(senderId, userIdToSend);
 
         await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, { parse_mode: "Markdown" });
         await ctx.reply(`✅ Сообщение отправлено!`, sendAgainKeyboard(userIdToSend));
-        await ctx.scene.leave(); // Выходим из сцены
+        await ctx.scene.leave();
     } catch (e) {
-        console.error(`Ошибка при отправке текстового сообщения:`, e);
+        console.error(`[Bot] Ошибка отправки текста от ${senderId} к ${userIdToSend}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
             `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
@@ -46,7 +43,6 @@ sendScene.on('text', async (ctx) => {
     }
 });
 
-// Обработчики для медиафайлов в состоянии Send.code
 sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sticker', 'poll'], async (ctx) => {
     const userIdToSend = ctx.scene.state.user;
     const senderId = ctx.from.id;
@@ -68,13 +64,11 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
         } else if (message.voice) {
             await ctx.telegram.sendVoice(userIdToSend, message.voice.file_id, { caption: caption, parse_mode: "Markdown" });
         } else if (message.video_note) {
-            // Video notes do not support captions directly in sendVideoNote, send text separately
             if (caption && caption !== baseText) {
                 await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown" });
             }
             await ctx.telegram.sendVideoNote(userIdToSend, message.video_note.file_id);
         } else if (message.sticker) {
-            // Stickers do not support captions directly in sendSticker, send text separately
             if (caption && caption !== baseText) {
                 await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown" });
             }
@@ -82,21 +76,20 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
         } else if (message.poll) {
             const question = message.poll.question;
             const options = message.poll.options.map(o => o.text);
-            await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown" }); // Send base text first
+            await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown" });
             await ctx.telegram.sendPoll(userIdToSend, question, options, {
                 is_anonymous: message.poll.is_anonymous,
                 type: message.poll.type,
                 allows_multiple_answers: message.poll.allows_multiple_answers
             });
         } else {
-            // Fallback for unhandled media types or if message is empty
             return ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения или произошла ошибка. Пожалуйста, попробуйте другой тип.");
         }
 
         await ctx.reply(`✅ Сообщение отправлено!`, sendAgainKeyboard(userIdToSend));
-        await ctx.scene.leave(); // Выходим из сцены
+        await ctx.scene.leave();
     } catch (e) {
-        console.error(`Ошибка при отправке медиа/опроса:`, e);
+        console.error(`[Bot] Ошибка отправки медиа/опроса от ${senderId} к ${userIdToSend}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
             `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
@@ -105,18 +98,17 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     }
 });
 
-// Обработчик для кнопки "Отмена" внутри сцены
 sendScene.action('cancel', async (ctx) => {
     await ctx.answerCbQuery("Действие отменено!");
-    await ctx.deleteMessage(); // Удаляем сообщение с кнопкой "Отмена"
-    await ctx.scene.leave(); // Выходим из сцены
+    if (ctx.callbackQuery.message) {
+        await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
+    }
+    await ctx.scene.leave();
 });
 
 
-// Создаем менеджер сцен
 const stage = new Scenes.Stage([sendScene]);
 
-// Регистрируем middleware для сессий и сцен
 bot.use(session());
 bot.use(stage.middleware());
 
@@ -129,9 +121,8 @@ bot.use(async (ctx, next) => {
     const userId = ctx.from.id;
     const now = Date.now();
 
-    // Обновляем lastInteraction при каждом сообщении
     if (ctx.chat && ctx.chat.id) {
-        await setUser(ctx.chat.id); // Обновляем lastInteraction через setUser
+        await setUser(ctx.chat.id);
     }
 
     const lastExecuted = cooldowns.get(userId);
@@ -140,7 +131,6 @@ bot.use(async (ctx, next) => {
         const timeLeft = (COOLDOWN_SECONDS * 1000) - timeElapsed;
         if (timeLeft > 0) {
             const secondsLeft = Math.ceil(timeLeft / 1000);
-            console.log(`[Anti-flood] User ${userId} is on cooldown for ${secondsLeft}s.`);
             return ctx.reply(`Пожалуйста, подождите ${secondsLeft} секунд перед отправкой следующего запроса.`);
         }
     }
@@ -151,30 +141,27 @@ bot.use(async (ctx, next) => {
 
 // --- Обработчики команд ---
 
-// Команда /start
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
     const messageText = ctx.message.text;
 
-    // Установка пользователя и получение его кода
     await setUser(chatId);
     const userCode = await getUserCode(chatId);
 
     const botInfo = await ctx.telegram.getMe();
     const link = `https://t.me/${botInfo.username}?start=${userCode}`;
 
-    // Проверяем, есть ли код в сообщении (для перехода по ссылке)
     if (messageText && messageText.length > 6 && messageText.startsWith('/start ')) {
         const receivedCode = messageText.substring(7);
-        const userIdToSend = await getChatIdByCode(receivedCode);
+        const userIdToSend = await getTgIdByCode(receivedCode);
 
         if (userIdToSend) {
-            ctx.scene.enter('sendScene', { user: userIdToSend }); // Переходим в сцену отправки
+            await addLinkClick(userIdToSend);
+            await ctx.scene.enter('sendScene', { user: userIdToSend });
         } else {
             await ctx.reply(`Неверный код пользователя: \`${receivedCode}\`. Пожалуйста, проверьте ссылку.`, { parse_mode: "Markdown" });
         }
     } else {
-        // Обычный запуск бота
         await ctx.reply(
             `🚀 Начни получать анонимные сообщения прямо сейчас!\n\n` +
             `Твоя ссылка:\n👉 \`${link}\`\n\n` +
@@ -184,10 +171,9 @@ bot.start(async (ctx) => {
     }
 });
 
-// Команда /profile (аналог /mystats)
 bot.command('profile', async (ctx) => {
     const chatId = ctx.chat.id;
-    const { received, sent } = await getMessageCounts(chatId);
+    const { received, sent, linkClicks } = await getMessageCounts(chatId);
     const userCode = await getUserCode(chatId);
 
     const botInfo = await ctx.telegram.getMe();
@@ -195,13 +181,10 @@ bot.command('profile', async (ctx) => {
 
     await ctx.reply(
         `➖➖➖➖➖➖➖➖➖➖➖\n` +
-        `*Информация о вас:*\n \n` +
-        `👤 Username: @${ctx.from.username || 'N/A'}\n` +
-        `ℹ️ Id: ${ctx.from.id}\n\n` +
-        `*Сообщения:*\n` +
-        `📥 Кол-во полученных: ${received}\n` +
-        `📤 Кол-во отправленных: ${sent}\n` +
-        `                         \n` +
+        `*Статистика профиля*\n\n` +
+        `➖ За всё время:\n` +
+        `💬 Сообщений: ${received + sent}\n` +
+        `👀 Переходов по ссылке: ${linkClicks}\n\n` +
         `🔗 Твоя ссылка: \n` +
         `👉\`${link}\`\n` +
         `➖➖➖➖➖➖➖➖➖➖➖`,
@@ -209,31 +192,26 @@ bot.command('profile', async (ctx) => {
     );
 });
 
-// Команда /help
 bot.command('help', async (ctx) => {
     await ctx.reply("Помощь будет");
 });
 
-// --- Обработка callback_query для кнопки "Отправить ещё раз" ---
 bot.action(/^again_(.+)$/, async (ctx) => {
-    const userIdToSend = ctx.match[1]; // Получаем ID пользователя из callback_data
-    await ctx.answerCbQuery(); // Отвечаем на callback_query
-    await ctx.deleteMessage(); // Удаляем предыдущее сообщение с кнопкой
-
-    ctx.scene.enter('sendScene', { user: userIdToSend }); // Переходим в сцену отправки
+    const userIdToSend = ctx.match[1];
+    await ctx.answerCbQuery();
+    if (ctx.callbackQuery.message) {
+        await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
+    }
+    await ctx.scene.enter('sendScene', { user: userIdToSend });
 });
 
-
-// Общий обработчик текстовых сообщений (если не попал ни в одну команду/FSM)
 bot.on('text', async (ctx) => {
-    // Если сообщение не было обработано сценой, то это неизвестная команда или просто текст
     await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.');
 });
 
-// Обработка любых других типов сообщений, не обработанных FSM
 bot.on('message', async (ctx) => {
-    // Если сообщение не было обработано ни одной сценой, ни текстовым хэндлером выше
-    if (!ctx.message.text && !ctx.message.caption) { // Если нет текста или подписи (для медиа)
+    const handledByScene = ctx.session && ctx.session.__scenes && ctx.session.__scenes.current;
+    if (!handledByScene && !ctx.message.text && !ctx.message.caption && !ctx.message.photo && !ctx.message.video && !ctx.message.document && !ctx.message.audio && !ctx.message.voice && !ctx.message.video_note && !ctx.message.sticker && !ctx.message.poll) {
         await ctx.reply('Я не понял ваш запрос. Пожалуйста, используйте команды из меню или отправьте поддерживаемый тип сообщения.');
     }
 });
