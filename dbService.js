@@ -1,24 +1,24 @@
 import { User } from './userModel.js';
-import crypto from 'crypto'; // Для генерации уникального кода
+import crypto from 'crypto';
 
-// Функция для добавления нового пользователя или получения существующего
 async function setUser(tgId) {
     try {
         let user = await User.findOne({ tg_id: tgId });
         if (!user) {
-            const userCode = crypto.randomBytes(5).toString('hex').toUpperCase(); // 10 символов (5 байт * 2 hex)
+            const userCode = crypto.randomBytes(5).toString('hex').toUpperCase();
             user = new User({
                 tg_id: tgId,
                 code: userCode,
                 message_get: 0,
                 message_count: 0,
                 linkClicksCount: 0,
+                blockedUsers: [], // Инициализируем новое поле
                 lastInteraction: new Date()
             });
             await user.save();
             console.log(`[DB] Добавлен новый пользователь: ${tgId}, код: ${userCode}`);
         } else {
-            user.lastInteraction = new Date(); // Обновляем дату последнего взаимодействия
+            user.lastInteraction = new Date();
             await user.save();
         }
         return user;
@@ -28,7 +28,6 @@ async function setUser(tgId) {
     }
 }
 
-// Функция для получения уникального кода пользователя
 async function getUserCode(tgId) {
     try {
         const user = await User.findOne({ tg_id: tgId });
@@ -39,7 +38,6 @@ async function getUserCode(tgId) {
     }
 }
 
-// Функция для получения Telegram ID пользователя по его уникальному коду
 async function getTgIdByCode(userCode) {
     try {
         const user = await User.findOne({ code: userCode });
@@ -50,7 +48,6 @@ async function getTgIdByCode(userCode) {
     }
 }
 
-// Функция для получения статистики сообщений пользователя
 async function getMessageCounts(tgId) {
     try {
         const user = await User.findOne({ tg_id: tgId });
@@ -68,7 +65,6 @@ async function getMessageCounts(tgId) {
     }
 }
 
-// Функция для обновления счетчиков отправленных и полученных сообщений
 async function addMessageCounts(senderId, receiverId) {
     try {
         await User.updateOne(
@@ -85,7 +81,6 @@ async function addMessageCounts(senderId, receiverId) {
     }
 }
 
-// Новая функция для увеличения счетчика переходов по ссылке
 async function addLinkClick(tgId) {
     try {
         await User.updateOne(
@@ -99,7 +94,6 @@ async function addLinkClick(tgId) {
     }
 }
 
-// НОВАЯ ФУНКЦИЯ: Обновление уникального кода пользователя
 async function updateUserCode(tgId) {
     try {
         const newCode = crypto.randomBytes(5).toString('hex').toUpperCase();
@@ -115,6 +109,48 @@ async function updateUserCode(tgId) {
     }
 }
 
+// НОВАЯ ФУНКЦИЯ: Заблокировать пользователя
+async function blockUser(blockerTgId, blockedTgId) {
+    try {
+        await User.updateOne(
+            { tg_id: blockerTgId },
+            { $addToSet: { blockedUsers: blockedTgId }, $set: { lastInteraction: new Date() } } // $addToSet предотвращает дубликаты
+        );
+        console.log(`[DB] Пользователь ${blockerTgId} заблокировал ${blockedTgId}.`);
+    } catch (error) {
+        console.error(`[DB] Ошибка в blockUser для ${blockerTgId} блокирующего ${blockedTgId}:`, error.message);
+        throw error;
+    }
+}
+
+// НОВАЯ ФУНКЦИЯ: Разблокировать пользователя (на случай, если понадобится)
+async function unblockUser(blockerTgId, unblockedTgId) {
+    try {
+        await User.updateOne(
+            { tg_id: blockerTgId },
+            { $pull: { blockedUsers: unblockedTgId }, $set: { lastInteraction: new Date() } }
+        );
+        console.log(`[DB] Пользователь ${blockerTgId} разблокировал ${unblockedTgId}.`);
+    } catch (error) {
+        console.error(`[DB] Ошибка в unblockUser для ${blockerTgId} разблокирующего ${unblockedTgId}:`, error.message);
+        throw error;
+    }
+}
+
+// НОВАЯ ФУНКЦИЯ: Проверить, заблокирован ли пользователь
+async function isUserBlocked(blockerTgId, potentialBlockedTgId) {
+    try {
+        const user = await User.findOne({ tg_id: blockerTgId });
+        if (!user) {
+            return false; // Если блокирующего пользователя нет, то и блокировки нет
+        }
+        return user.blockedUsers.includes(potentialBlockedTgId);
+    } catch (error) {
+        console.error(`[DB] Ошибка в isUserBlocked для ${blockerTgId} проверяющего ${potentialBlockedTgId}:`, error.message);
+        throw error;
+    }
+}
+
 
 export {
     setUser,
@@ -123,5 +159,8 @@ export {
     getMessageCounts,
     addMessageCounts,
     addLinkClick,
-    updateUserCode // Экспортируем новую функцию
+    updateUserCode,
+    blockUser, // Экспортируем новые функции
+    unblockUser,
+    isUserBlocked
 };
