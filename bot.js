@@ -476,4 +476,4 @@ process.once('SIGTERM', async () => {
     console.log('Получен сигнал SIGTERM. Остановка бота...');
     await bot.stop('SIGTERM');
 });
-                        
+                                        
