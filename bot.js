@@ -2,8 +2,8 @@ import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import dotenv from 'dotenv';
 
 // Импортируем сервисы базы данных и клавиатуры
-import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick } from './dbService.js';
-import { cancelKeyboard, sendAgainKeyboard } from './keyboards.js';
+import { setUser, getUserCode, getTgIdByCode, getMessageCounts, addMessageCounts, addLinkClick, updateUserCode } from './dbService.js';
+import { cancelKeyboard, sendAgainKeyboard, replyToSenderKeyboard } from './keyboards.js'; // Импортируем новую клавиатуру
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -12,6 +12,8 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 export const bot = new Telegraf(BOT_TOKEN);
 
 // --- FSM (Finite State Machine) - Сцены и состояния ---
+
+// Сцена для отправки ПЕРВОГО анонимного сообщения
 const sendScene = new Scenes.BaseScene('sendScene');
 
 sendScene.enter(async (ctx) => {
@@ -22,14 +24,18 @@ sendScene.enter(async (ctx) => {
     );
 });
 
+// Обработчики для отправки сообщений в sendScene (первое сообщение)
 sendScene.on('text', async (ctx) => {
-    const userIdToSend = ctx.scene.state.user;
-    const senderId = ctx.from.id;
+    const userIdToSend = ctx.scene.state.user; // Получатель
+    const senderId = ctx.from.id; // Отправитель
 
     try {
         await addMessageCounts(senderId, userIdToSend);
 
-        await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, { parse_mode: "Markdown" });
+        await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
+            parse_mode: "Markdown",
+            reply_markup: replyToSenderKeyboard(senderId).reply_markup // Добавляем кнопку "Ответить"
+        });
         await ctx.reply(`✅ Сообщение отправлено!`, sendAgainKeyboard(userIdToSend));
         await ctx.scene.leave();
     } catch (e) {
@@ -48,34 +54,36 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     const message = ctx.message;
     const baseText = "✉️ *Пришло новое сообщение!*\n\n";
     const caption = message.caption ? baseText + message.caption : baseText;
+    const replyMarkup = replyToSenderKeyboard(senderId).reply_markup; // Кнопка ответа
 
     try {
         await addMessageCounts(senderId, userIdToSend);
 
         if (message.photo) {
-            await ctx.telegram.sendPhoto(userIdToSend, message.photo[message.photo.length - 1].file_id, { caption: caption, parse_mode: "Markdown" });
+            await ctx.telegram.sendPhoto(userIdToSend, message.photo[message.photo.length - 1].file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.video) {
-            await ctx.telegram.sendVideo(userIdToSend, message.video.file_id, { caption: caption, parse_mode: "Markdown" });
+            await ctx.telegram.sendVideo(userIdToSend, message.video.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.document) {
-            await ctx.telegram.sendDocument(userIdToSend, message.document.file_id, { caption: caption, parse_mode: "Markdown" });
+            await ctx.telegram.sendDocument(userIdToSend, message.document.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.audio) {
-            await ctx.telegram.sendAudio(userIdToSend, message.audio.file_id, { caption: caption, parse_mode: "Markdown" });
+            await ctx.telegram.sendAudio(userIdToSend, message.audio.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.voice) {
-            await ctx.telegram.sendVoice(userIdToSend, message.voice.file_id, { caption: caption, parse_mode: "Markdown" });
+            await ctx.telegram.sendVoice(userIdToSend, message.voice.file_id, { caption: caption, parse_mode: "Markdown", reply_markup: replyMarkup });
         } else if (message.video_note) {
+            // Video notes and stickers don't support captions directly with reply_markup, send text separately
             if (caption && caption !== baseText) {
-                await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown" });
+                await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
             }
             await ctx.telegram.sendVideoNote(userIdToSend, message.video_note.file_id);
         } else if (message.sticker) {
             if (caption && caption !== baseText) {
-                await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown" });
+                await ctx.telegram.sendMessage(userIdToSend, caption, { parse_mode: "Markdown", reply_markup: replyMarkup });
             }
             await ctx.telegram.sendSticker(userIdToSend, message.sticker.file_id);
         } else if (message.poll) {
             const question = message.poll.question;
             const options = message.poll.options.map(o => o.text);
-            await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown" });
+            await ctx.telegram.sendMessage(userIdToSend, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup }); // Send base text with reply button
             await ctx.telegram.sendPoll(userIdToSend, question, options, {
                 is_anonymous: message.poll.is_anonymous,
                 type: message.poll.type,
@@ -105,9 +113,59 @@ sendScene.action('cancel', async (ctx) => {
     await ctx.scene.leave();
 });
 
+// НОВАЯ СЦЕНА: Для ответа на анонимное сообщение
+const replyScene = new Scenes.BaseScene('replyScene');
 
-const stage = new Scenes.Stage([sendScene]);
+replyScene.enter(async (ctx) => {
+    const originalSenderId = ctx.scene.state.originalSender; // Получаем ID оригинального отправителя из состояния сцены
+    if (!originalSenderId) {
+        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown' });
+        return ctx.scene.leave();
+    }
+    await ctx.reply('👉 Введите ваше анонимное ответное сообщение.', { reply_markup: cancelKeyboard().reply_markup });
+});
 
+replyScene.on('message', async (ctx) => {
+    const originalSenderId = ctx.scene.state.originalSender; // Оригинальный отправитель
+    const replierId = ctx.from.id; // Текущий пользователь, который отвечает
+
+    if (!originalSenderId) {
+        await ctx.reply('⚠️ Ошибка: Не удалось определить, кому ответить. Пожалуйста, начните сначала.', { parse_mode: 'Markdown' });
+        return ctx.scene.leave();
+    }
+
+    try {
+        // Пересылаем сообщение от отвечающего к оригинальному отправителю
+        await ctx.telegram.forwardMessage(originalSenderId, ctx.chat.id, ctx.message.message_id);
+        
+        // Обновляем счетчики: replier отправляет, originalSenderId получает
+        await addMessageCounts(replierId, originalSenderId);
+
+        await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { parse_mode: 'Markdown' });
+        await ctx.scene.leave();
+    } catch (e) {
+        console.error(`[Bot] Ошибка отправки ответного сообщения от ${replierId} к ${originalSenderId}:`, e.message);
+        await ctx.reply(
+            `⚠️❌ Произошла ошибка при отправке ответного сообщения: \`${e.message}\`\n\n` +
+            `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
+            { parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
+        );
+    }
+});
+
+replyScene.action('cancel', async (ctx) => {
+    await ctx.answerCbQuery("Действие отменено!");
+    if (ctx.callbackQuery.message) {
+        await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
+    }
+    await ctx.scene.leave();
+});
+
+
+// Создаем менеджер сцен
+const stage = new Scenes.Stage([sendScene, replyScene]); // Добавляем replyScene
+
+// Регистрируем middleware для сессий и сцен
 bot.use(session());
 bot.use(stage.middleware());
 
@@ -170,7 +228,8 @@ bot.start(async (ctx) => {
     }
 });
 
-bot.command('profile', async (ctx) => {
+// ИЗМЕНЕНО: Команда /profile теперь /stats
+bot.command('stats', async (ctx) => {
     const chatId = ctx.chat.id;
     const { received, sent, linkClicks } = await getMessageCounts(chatId);
     const userCode = await getUserCode(chatId);
@@ -191,10 +250,45 @@ bot.command('profile', async (ctx) => {
     );
 });
 
+// НОВАЯ КОМАНДА: /url для изменения ссылки
+bot.command('url', async (ctx) => {
+    const chatId = ctx.chat.id;
+    const userCode = await getUserCode(chatId);
+    const botInfo = await ctx.telegram.getMe();
+    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
+
+    await ctx.reply(
+        `🔗 *Ваша текущая ссылка:*\n👉 \`${link}\`\n\n` +
+        `Вы можете разместить ее в описании профиля.\n\n` +
+        `Если вы хотите *сгенерировать новую ссылку*, нажмите кнопку ниже. ` +
+        `Ваша старая ссылка перестанет работать.`,
+        Markup.inlineKeyboard([
+            Markup.button.callback('Сгенерировать новую ссылку', 'generate_new_link')
+        ]).extra({ parse_mode: 'Markdown' })
+    );
+});
+
+// Обработка callback_query для генерации новой ссылки
+bot.action('generate_new_link', async (ctx) => {
+    await ctx.answerCbQuery('Генерируем новую ссылку...');
+    const chatId = ctx.from.id;
+    const newCode = await updateUserCode(chatId); // Используем новую функцию из dbService
+    const botInfo = await ctx.telegram.getMe();
+    const newLink = `https://t.me/${botInfo.username}?start=${newCode}`;
+
+    await ctx.editMessageText(
+        `✅ *Ваша новая ссылка успешно сгенерирована:*\n👉 \`${newLink}\`\n\n` +
+        `Ваша старая ссылка больше недействительна.`,
+        { parse_mode: 'Markdown' }
+    );
+});
+
+
 bot.command('help', async (ctx) => {
     await ctx.reply("Помощь будет");
 });
 
+// Обработка callback_query для кнопки "Отправить ещё раз"
 bot.action(/^again_(.+)$/, async (ctx) => {
     const userIdToSend = ctx.match[1];
     await ctx.answerCbQuery();
@@ -204,10 +298,24 @@ bot.action(/^again_(.+)$/, async (ctx) => {
     await ctx.scene.enter('sendScene', { user: userIdToSend });
 });
 
+// НОВЫЙ ОБРАБОТЧИК: Обработка callback_query для кнопки "Ответить анонимно"
+bot.action(/^reply_to_sender_(.+)$/, async (ctx) => {
+    const originalSenderId = ctx.match[1]; // Получаем ID оригинального отправителя
+    await ctx.answerCbQuery('Подготовка к ответу...');
+    if (ctx.callbackQuery.message) {
+        await ctx.deleteMessage(ctx.callbackQuery.message.message_id); // Удаляем сообщение с кнопкой "Ответить"
+    }
+    // Переходим в сцену ответа, передавая ID оригинального отправителя
+    ctx.scene.enter('replyScene', { originalSender: originalSenderId });
+});
+
+
+// Общий обработчик текстовых сообщений (если не попал ни в одну команду/FSM)
 bot.on('text', async (ctx) => {
     await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.');
 });
 
+// Обработка любых других типов сообщений, не обработанных FSM
 bot.on('message', async (ctx) => {
     const handledByScene = ctx.session && ctx.session.__scenes && ctx.session.__scenes.current;
     if (!handledByScene && !ctx.message.text && !ctx.message.caption && !ctx.message.photo && !ctx.message.video && !ctx.message.document && !ctx.message.audio && !ctx.message.voice && !ctx.message.video_note && !ctx.message.sticker && !ctx.message.poll) {
@@ -217,9 +325,7 @@ bot.on('message', async (ctx) => {
 
 
 // --- ЗАПУСК БОТА ---
-// Эта функция будет вызываться при импорте bot.js
 const startBot = async () => {
-    // Ждем, пока MongoDB будет подключен
     while (!global.mongooseConnection || global.mongooseConnection.readyState !== 1) {
         console.log('[Bot Startup] Ожидание подключения к MongoDB...');
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -238,6 +344,15 @@ const startBot = async () => {
         console.error('[Bot Startup] Ошибка при удалении вебхука:', error.message);
     }
 
+    // Установка команд для меню Telegram
+    await bot.telegram.setMyCommands([
+        { command: 'start', description: '🚀 Запустить бота' },
+        { command: 'stats', description: '📊 Моя статистика' },
+        { command: 'url', description: '🔗 Моя ссылка' },
+        { command: 'help', description: '❓ Помощь' }
+    ]);
+    console.log('[Bot Startup] Команды Telegram установлены.');
+
     // Запуск бота в режиме Long Polling
     bot.launch()
         .then(() => {
@@ -245,11 +360,20 @@ const startBot = async () => {
         })
         .catch(err => {
             console.error('❌ Ошибка при запуске Telegraf бота:', err);
-            // Если это 409 Conflict, Render перезапустит сервис, и он может запуститься успешно.
         });
 };
 
 // Вызываем функцию запуска бота сразу при импорте этого модуля
 startBot();
 
-                          
+// Graceful stop (для корректной остановки бота при сигналах SIGINT/SIGTERM)
+process.once('SIGINT', async () => {
+    console.log('Получен сигнал SIGINT. Остановка бота...');
+    await bot.stop('SIGINT'); // Останавливаем Telegraf бота
+    // MongoDB соединение будет закрыто в index.js
+});
+process.once('SIGTERM', async () => {
+    console.log('Получен сигнал SIGTERM. Остановка бота...');
+    await bot.stop('SIGTERM'); // Останавливаем Telegraf бота
+    // MongoDB соединение будет закрыто в index.js
+});
