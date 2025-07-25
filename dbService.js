@@ -7,10 +7,9 @@ async function setUser(tgId) {
         let user = await User.findOne({ tg_id: tgId });
         if (!user) {
             const userCode = crypto.randomBytes(5).toString('hex').toUpperCase(); // 10 символов (5 байт * 2 hex)
-            // ИЗМЕНЕНО: Передаем tg_id и code в конструктор User сразу
             user = new User({
-                tg_id: tgId, // <-- Обязательное поле
-                code: userCode, // <-- Обязательное поле
+                tg_id: tgId,
+                code: userCode,
                 message_get: 0,
                 message_count: 0,
                 linkClicksCount: 0,
@@ -100,11 +99,29 @@ async function addLinkClick(tgId) {
     }
 }
 
+// НОВАЯ ФУНКЦИЯ: Обновление уникального кода пользователя
+async function updateUserCode(tgId) {
+    try {
+        const newCode = crypto.randomBytes(5).toString('hex').toUpperCase();
+        await User.updateOne(
+            { tg_id: tgId },
+            { $set: { code: newCode, lastInteraction: new Date() } }
+        );
+        console.log(`[DB] Код пользователя ${tgId} обновлен на ${newCode}`);
+        return newCode;
+    } catch (error) {
+        console.error(`[DB] Ошибка в updateUserCode для ${tgId}:`, error.message);
+        throw error;
+    }
+}
+
+
 export {
     setUser,
     getUserCode,
     getTgIdByCode,
     getMessageCounts,
     addMessageCounts,
-    addLinkClick
+    addLinkClick,
+    updateUserCode // Экспортируем новую функцию
 };
