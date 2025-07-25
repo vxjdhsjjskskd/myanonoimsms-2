@@ -1,20 +1,26 @@
 import { Markup } from 'telegraf';
 
-// Соответствует функции cancel из Python
 function cancelKeyboard() {
     return Markup.inlineKeyboard([
         Markup.button.callback('Отмена', 'cancel')
     ]);
 }
 
-// Соответствует функции send_again из Python
 function sendAgainKeyboard(userId) {
     return Markup.inlineKeyboard([
         Markup.button.callback('Отправить ещё раз', `again_${userId}`)
     ]);
 }
 
+// ИЗМЕНЕНО: Текст кнопки "Ответить анонимно" на "Ответить"
+function replyToSenderKeyboard(originalSenderTgId) {
+    return Markup.inlineKeyboard([
+        Markup.button.callback('Ответить', `reply_to_sender_${originalSenderTgId}`) // Текст изменен здесь
+    ]);
+}
+
 export {
     cancelKeyboard,
-    sendAgainKeyboard
+    sendAgainKeyboard,
+    replyToSenderKeyboard
 };
