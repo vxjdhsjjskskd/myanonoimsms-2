@@ -7,7 +7,6 @@
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiohttp import web # Импортируем web-сервер aiohttp
 import asyncio
 import logging
 import os
@@ -35,8 +34,6 @@ from data.models import async_main as connect_to_mongo_db
 bot_token = os.getenv("BOT_TOKEN")
 if not bot_token:
     logger.error("BOT_TOKEN environment variable is not set!")
-    # Важно: если переменная не установлена, скрипт завершится,
-    # что предотвратит дальнейшие ошибки и покажет проблему в логах Render.
     raise ValueError("BOT_TOKEN environment variable is not set.")
 
 # Получаем WEBHOOK_HOST (Public URL Render-сервиса) из переменной окружения
@@ -54,7 +51,6 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 PORT = int(os.environ.get("PORT", 8080)) # 8080 - запасной порт, если PORT не установлен
 
 # Создаем объекты бота и диспетчера
-# ParseMode.HTML установлен по умолчанию для удобства
 bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -66,7 +62,7 @@ dp.include_routers(commands.rt, handlers.rt)
 
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
-async def on_startup(dispatcher: Dispatcher):
+async def on_startup_webhook(bot: Bot):
     """
     Функция, выполняемая при запуске бота.
     Здесь устанавливается вебхук и происходит подключение к БД.
@@ -76,34 +72,24 @@ async def on_startup(dispatcher: Dispatcher):
     # Подключение к MongoDB Atlas
     try:
         logger.info("Connecting to MongoDB Atlas...")
-        # Вызываем вашу функцию для подключения к базе данных.
-        # Если ваша функция 'async_main' (которую мы переименовали в 'connect_to_mongo_db')
-        # не отвечает за подключение к БД, или если у вас другая функция,
-        # замените вызов 'await connect_to_mongo_db()' на вашу реальную функцию.
         await connect_to_mongo_db() 
         logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
         logger.exception(f"Failed to connect to MongoDB Atlas: {e}")
-        # Если подключение к БД критично, можете выбросить исключение, чтобы остановить деплой.
-        # Иначе, бот запустится, но без доступа к БД.
         raise # Если критично, чтобы бот не работал без БД
 
     # Устанавливаем вебхук на Telegram API
-    # 'drop_pending_updates=True' удаляет все обновления, которые Telegram
-    # накопил, пока бот был оффлайн. Это полезно при первом запуске или после сбоев.
     await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
     logger.info(f"Webhook set successfully to: {WEBHOOK_URL}")
 
 
-async def on_shutdown(dispatcher: Dispatcher):
+async def on_shutdown_webhook(bot: Bot):
     """
     Функция, выполняемая при остановке бота.
     Здесь удаляется вебхук и закрывается сессия бота.
     """
     logger.info("Shutting down bot and deleting webhook...")
-    # Удаляем вебхук, чтобы Telegram перестал отправлять обновления на этот URL
     await bot.delete_webhook()
-    # Закрываем сессию бота
     await bot.session.close()
     logger.info("Webhook deleted and bot session closed.")
 
@@ -114,39 +100,23 @@ async def main():
     """
     Главная асинхронная функция, которая запускает бота как веб-сервис.
     """
-    # Регистрируем функции запуска и остановки в диспетчере
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
-
-    # Создаем веб-приложение aiohttp для обработки входящих вебхуков
-    web_app = web.Application()
-    # Привязываем хэндлер обновлений aiogram к нашему пути вебхука.
-    # Это ключевая строка для aiogram 3.x
-    web_app.router.add_post(WEBHOOK_PATH, dp.update_handler)
-
-    # Запускаем веб-сервер
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    # '0.0.0.0' означает, что сервер будет слушать на всех доступных сетевых интерфейсах.
-    # Это обязательно для работы на хостингах типа Render.
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
     
-    logger.info(f"Web server started on 0.0.0.0:{PORT}. Waiting for webhooks...")
-
-    # Держим главный цикл asyncio запущенным, чтобы веб-сервер продолжал работать.
-    # В случае вебхуков, это просто "бесконечный" цикл ожидания.
-    try:
-        while True:
-            await asyncio.sleep(3600) # Ожидаем, пока веб-сервер работает
-    except asyncio.CancelledError:
-        logger.info("Application stopped by CancelledError.")
-    finally:
-        # Убедимся, что ресурсы веб-сервера корректно очищены при завершении работы
-        await runner.cleanup()
-        logger.info("Web server stopped.")
+    # Запуск бота в режиме вебхуков
+    # aiogram сам создаст aiohttp веб-приложение и запустит его.
+    # Мы передаем ему URL для вебхука, а также функции, которые должны
+    # быть вызваны при старте и остановке.
+    logger.info(f"Starting bot in webhook mode on port {PORT}...")
+    await dp.start_webhook(
+        bot=bot,
+        webhook_url=WEBHOOK_URL,
+        on_startup=on_startup_webhook,
+        on_shutdown=on_shutdown_webhook,
+        # Веб-сервер будет слушать на всех интерфейсах (0.0.0.0) и на указанном порту
+        web_server_host='0.0.0.0',
+        web_server_port=PORT
+    )
+    logger.info("Bot stopped.")
 
 
 if __name__ == "__main__":
-    # Запускаем главную асинхронную функцию
     asyncio.run(main())
