@@ -1,12 +1,14 @@
 """
 Файл с главной функцией запуска бота (async def main)
-Модифицирован для работы с Telegram Long Polling на Render.
+Модифицирован для работы с Telegram Long Polling на Render,
+с добавлением минимального aiohttp веб-сервера для удовлетворения требований Render.
 
 """
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiohttp import web # Импортируем web для создания HTTP сервера
 import asyncio
 import logging
 import os
@@ -36,6 +38,9 @@ if not bot_token:
     logger.error("BOT_TOKEN environment variable is not set!")
     raise ValueError("BOT_TOKEN environment variable is not set.")
 
+# Получаем порт, который Render предоставит нашему сервису
+PORT = int(os.environ.get("PORT", 8080)) # 8080 - запасной порт, если PORT не установлен
+
 # Создаем объекты бота и диспетчера
 bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -45,6 +50,24 @@ dp = Dispatcher()
 # Убедитесь, что в commands.py и handlers.py у вас созданы объекты Router,
 # например: rt = Router()
 dp.include_routers(commands.rt, handlers.rt)
+
+# == ОБРАБОТЧИКИ ДЛЯ МИНИМАЛЬНОГО ВЕБ-СЕРВЕРА AIOHTTP ==
+
+async def index_handler(request):
+    """
+    Простой обработчик для корневого URL.
+    Подтверждает, что веб-сервер активен.
+    """
+    return web.Response(text="Анонимный бот активен и работает!")
+
+async def health_check_handler(request):
+    """
+    Обработчик для проверки работоспособности (Health Check).
+    """
+    # Здесь можно добавить проверку статуса MongoDB, если нужно
+    db_status = "connected" # Предполагаем, что connect_to_mongo_db уже отработал
+    return web.json_response({"status": "OK", "bot_status": "polling", "database": db_status})
+
 
 # == ФУНКЦИИ ЗАПУСКА И ОСТАНОВКИ ==
 
@@ -75,6 +98,18 @@ async def on_startup_polling(dispatcher: Dispatcher, bot: Bot):
     else:
         logger.info("No active webhook found.")
 
+    # == УСТАНОВКА КОМАНД МЕНЮ TELEGRAM ==
+    # Здесь мы устанавливаем команды, которые будут отображаться в меню бота в Telegram.
+    await bot.set_my_commands([
+        types.BotCommand(command="start", description="🚀 Запустить бота"),
+        types.BotCommand(command="profile", description="📊 Мой профиль (статистика и ссылка)"),
+        types.BotCommand(command="help", description="❓ Помощь"),
+        # types.BotCommand(command="url", description="🔗 Изменить/показать ссылку"),
+        # types.BotCommand(command="issue", description="💡 Предложить идею"),
+        # types.BotCommand(command="lang", description="🏳️ Выбрать язык"),
+    ])
+    logger.info("Telegram bot commands set successfully.")
+
     logger.info("Bot is ready to start polling for updates.")
 
 
@@ -92,23 +127,42 @@ async def on_shutdown_polling(dispatcher: Dispatcher, bot: Bot):
 
 async def main():
     """
-    Главная асинхронная функция, которая запускает бота в режиме Long Polling.
+    Главная асинхронная функция, которая запускает бота и веб-сервер.
     """
-    # Регистрируем функции запуска и остановки
+    # Регистрируем функции запуска и остановки для диспетчера
     dp.startup.register(on_startup_polling)
     dp.shutdown.register(on_shutdown_polling)
 
-    logger.info("Starting bot's Long Polling loop...")
+    # Создаем aiohttp.web.Application для минимального веб-сервера
+    web_app = web.Application()
+    web_app.router.add_get('/', index_handler)
+    web_app.router.add_get('/health', health_check_handler) # Для проверки работоспособности
+
+    # Запускаем aiohttp веб-сервер
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+
+    logger.info(f"Starting aiohttp web server on 0.0.0.0:{PORT}...")
+    await site.start()
+    logger.info("aiohttp web server started.")
+
+    # Запускаем Long Polling бота и ждем, пока веб-сервер закроется
+    logger.info("Starting bot's Long Polling loop alongside web server...")
     try:
-        # Запускаем Long Polling. Эта функция блокирует выполнение,
-        # пока бот работает, поэтому не нужен asyncio.Future().
-        await dp.start_polling(bot)
+        # Запускаем обе задачи параллельно
+        await asyncio.gather(
+            dp.start_polling(bot), # Long Polling для Telegram
+            site.wait_closed()     # Ждем закрытия веб-сервера (по сути, держит процесс живым)
+        )
     except asyncio.CancelledError:
-        logger.info("Bot polling stopped by CancelledError.")
+        logger.info("Application stopped by CancelledError (e.g., SIGTERM).")
     except Exception as e:
-        logger.exception(f"An unexpected error occurred during polling: {e}")
+        logger.exception(f"An unexpected error occurred during application runtime: {e}")
     finally:
-        logger.info("Bot polling loop finished.")
+        # Очистка ресурсов при завершении работы
+        await runner.cleanup() # Очистка ресурсов aiohttp
+        logger.info("Web server and bot polling stopped, resources cleaned up.")
 
 
 if __name__ == "__main__":
