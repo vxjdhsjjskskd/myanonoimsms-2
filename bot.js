@@ -125,7 +125,8 @@ sendScene.action('cancel', async (ctx) => {
     }
     await ctx.scene.leave();
 });
-// НОВАЯ СЦЕНА: Для ответа на анонимное сообщение
+
+// Сцена для ответа на анонимное сообщение
 const replyScene = new Scenes.BaseScene('replyScene');
 
 replyScene.enter(async (ctx) => {
@@ -137,7 +138,7 @@ replyScene.enter(async (ctx) => {
     await ctx.reply('👉 Введите ваше анонимное ответное сообщение.', { reply_markup: cancelKeyboard().reply_markup, reply_to_message_id: ctx.message.message_id });
 });
 
-// ИЗМЕНЕНО: Обработчик для пересылки сообщения (теперь пересоздает его для анонимности)
+// Обработчик для пересоздания сообщения для анонимности
 replyScene.on('message', async (ctx) => {
     const originalSenderId = ctx.scene.state.originalSender; // Оригинальный отправитель
     const replierId = ctx.from.id; // Текущий пользователь, который отвечает
@@ -216,8 +217,6 @@ replyScene.action('cancel', async (ctx) => {
     }
     await ctx.scene.leave();
 });
-
-
 // Создаем менеджер сцен
 const stage = new Scenes.Stage([sendScene, replyScene]);
 
@@ -250,7 +249,9 @@ bot.use(async (ctx, next) => {
     cooldowns.set(userId, now);
     return next();
 });
-               // --- Обработчики команд ---
+
+
+// --- Обработчики команд ---
 
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
@@ -260,7 +261,8 @@ bot.start(async (ctx) => {
     const userCode = await getUserCode(chatId);
 
     const botInfo = await ctx.telegram.getMe();
-    const link = `https.t.me/${botInfo.username}?start=${userCode}`;
+    // ИСПРАВЛЕНО: Добавлены // после https:
+    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
 
     if (messageText && messageText.length > 6 && messageText.startsWith('/start ')) {
         const receivedCode = messageText.substring(7);
@@ -295,7 +297,8 @@ bot.command('stats', async (ctx) => {
     const userCode = await getUserCode(chatId);
 
     const botInfo = await ctx.telegram.getMe();
-    const link = `https.t.me/${botInfo.username}?start=${userCode}`;
+    // ИСПРАВЛЕНО: Добавлены // после https:
+    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
 
     await ctx.reply(
         `➖➖➖➖➖➖➖➖➖➖➖\n` +
@@ -315,7 +318,8 @@ bot.command('url', async (ctx) => {
     const chatId = ctx.chat.id;
     const userCode = await getUserCode(chatId);
     const botInfo = await ctx.telegram.getMe();
-    const link = `https.t.me/${botInfo.username}?start=${userCode}`;
+    // ИСПРАВЛЕНО: Добавлены // после https:
+    const link = `https://t.me/${botInfo.username}?start=${userCode}`;
 
     await ctx.reply(
         `🔗 *Ваша текущая ссылка:*\n👉 \`${link}\`\n\n` +
@@ -332,13 +336,13 @@ bot.command('url', async (ctx) => {
     );
 });
 
-// Обработка callback_query для генерации новой ссылки
 bot.action('generate_new_link', async (ctx) => {
     await ctx.answerCbQuery('Генерируем новую ссылку...');
     const chatId = ctx.from.id;
     const newCode = await updateUserCode(chatId); // Используем новую функцию из dbService
     const botInfo = await ctx.telegram.getMe();
-    const newLink = `https.t.me/${botInfo.username}?start=${newCode}`;
+    // ИСПРАВЛЕНО: Добавлены // после https:
+    const newLink = `https://t.me/${botInfo.username}?start=${newCode}`;
 
     await ctx.editMessageText(
         `✅ *Ваша новая ссылка успешно сгенерирована:*\n👉 \`${newLink}\`\n\n` +
@@ -449,9 +453,10 @@ startBot();
 // Graceful stop (для корректной остановки бота при сигналах SIGINT/SIGTERM)
 process.once('SIGINT', async () => {
     console.log('Получен сигнал SIGINT. Остановка бота...');
-    await bot.stop('SIGINT'); // Останавливаем Telegraf бота
+    await bot.stop('SIGINT');
 });
 process.once('SIGTERM', async () => {
     console.log('Получен сигнал SIGTERM. Остановка бота...');
-    await bot.stop('SIGTERM'); // Останавливаем Telegraf бота
+    await bot.stop('SIGTERM');
 });
+        
