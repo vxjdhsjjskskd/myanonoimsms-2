@@ -3,11 +3,11 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { User } from './userModel.js'; // Импортируем модель пользователя MongoDB
 
+// --- ИЗМЕНЕНО: Импортируем основной файл бота, который сам запускается ---
+import './bot.js'; 
+
 // Загружаем переменные окружения из .env файла
 dotenv.config();
-
-// Импортируем основной файл бота
-import { bot } from './bot.js'; // bot.js будет экспортировать инстанс Telegraf
 
 const app = express();
 const port = process.env.PORT || 3000; 
@@ -24,7 +24,7 @@ async function connectDB() {
     try {
         await mongoose.connect(MONGO_URI);
         console.log('✅ MongoDB: Подключение к базе данных успешно.');
-        global.mongooseConnection = mongoose.connection;
+        global.mongooseConnection = mongoose.connection; // Делаем соединение доступным глобально
     } catch (error) {
         console.error('❌ Ошибка подключения к MongoDB:', error);
         process.exit(1);
@@ -55,53 +55,26 @@ app.listen(port, async () => {
     console.log(`🌐 Веб-сервер запущен на порту ${port}`);
     console.log(`🏥 Health check доступен по адресу: http://localhost:${port}/health`);
     
-    await connectDB();
-
-    // --- ИЗМЕНЕНО: Более агрессивное удаление вебхука перед запуском Long Polling ---
-    try {
-        console.log('[Bot] Попытка удалить существующий вебхук перед запуском Long Polling...');
-        // bot.telegram.deleteWebhook() возвращает true/false
-        const deleted = await bot.telegram.deleteWebhook();
-        if (deleted) {
-            console.log('[Bot] Вебхук успешно удален.');
-        } else {
-            console.log('[Bot] Вебхук не был активен или уже удален.');
-        }
-    } catch (error) {
-        console.error('[Bot] Ошибка при удалении вебхука:', error.message);
-        // Продолжаем, даже если ошибка, так как Long Polling может работать
-    }
-    // --- КОНЕЦ ИЗМЕНЕННОГО БЛОКА ---
-
-    bot.launch()
-        .then(() => {
-            console.log('✅ Telegraf бот запущен в режиме Long Polling.');
-        })
-        .catch(err => {
-            console.error('❌ Ошибка при запуске Telegraf бота:', err);
-            // Важно: если это 409 Conflict, бот все равно может начать работать после нескольких попыток.
-            // Render будет пытаться перезапустить сервис.
-        });
+    // Инициализируем MongoDB. Бот запустится сам после успешного подключения (в bot.js)
+    await connectDB(); 
 });
 
-// Graceful stop
+// Graceful stop (для корректной остановки бота при сигналах SIGINT/SIGTERM)
 process.once('SIGINT', async () => {
-    console.log('Получен сигнал SIGINT. Остановка бота...');
-    await bot.stop('SIGINT');
+    console.log('Получен сигнал SIGINT. Остановка приложения...');
+    // bot.stop() будет вызван в bot.js через глобальный обработчик
     if (global.mongooseConnection) {
         await global.mongooseConnection.close();
         console.log('🔗 MongoDB соединение закрыто.');
     }
-    console.log('🔗 Бот остановлен (SIGINT).');
     process.exit(0);
 });
 process.once('SIGTERM', async () => {
-    console.log('Получен сигнал SIGTERM. Остановка бота...');
-    await bot.stop('SIGTERM');
+    console.log('Получен сигнал SIGTERM. Остановка приложения...');
+    // bot.stop() будет вызван в bot.js через глобальный обработчик
     if (global.mongooseConnection) {
         await global.mongooseConnection.close();
         console.log('🔗 MongoDB соединение закрыто.');
     }
-    console.log('🔗 Бот остановлен (SIGTERM).');
     process.exit(0);
 });
