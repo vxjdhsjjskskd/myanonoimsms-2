@@ -70,10 +70,18 @@ async def handle_webhook(request: web.Request):
     """
     url = str(request.url)
     if url.endswith(WEBHOOK_PATH):
-        update = web.json_response(await request.json())
-        # Обрабатываем обновление через диспетчер
-        await dp.feed_update(bot, update) # <-- ОСНОВНОЙ МЕТОД ОБРАБОТКИ ОБНОВЛЕНИЙ
-        return web.Response(status=200)
+        try:
+            # Получаем JSON-тело запроса
+            update_json = await request.json()
+            
+            # Передаем JSON-данные в диспетчер для обработки.
+            # Aiogram сам десериализует их в объект Update.
+            await dp.feed_raw_update(update_json) # <-- ИСПРАВЛЕНО: ИСПОЛЬЗУЕМ feed_raw_update
+
+            return web.Response(status=200)
+        except Exception as e:
+            logger.error(f"Error processing webhook update: {e}", exc_info=True)
+            return web.Response(status=500) # Возвращаем 500 в случае ошибки
     else:
         # Если URL не соответствует, возвращаем 404
         return web.Response(status=404)
@@ -135,9 +143,7 @@ async def main():
     try:
         # Запускаем aiohttp веб-сервер
         # Он будет слушать на всех интерфейсах (0.0.0.0) и на указанном порту
-        await web._run_app(web_app, host='0.0.0.0', port=PORT) # <-- ИСПОЛЬЗУЕМ web._run_app
-                                                           # (с подчеркиванием, это внутренняя функция,
-                                                           # но она наиболее стабильна для прямого запуска)
+        await web._run_app(web_app, host='0.0.0.0', port=PORT)
     except asyncio.CancelledError:
         logger.info("Application stopped by CancelledError.")
     except Exception as e:
@@ -148,3 +154,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
