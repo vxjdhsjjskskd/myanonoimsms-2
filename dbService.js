@@ -1,4 +1,4 @@
-import { User } from './userModel.js';
+import { User, AnonMessageContext } from './userModel.js'; // Импортируем AnonMessageContext
 import crypto from 'crypto';
 
 async function setUser(tgId) {
@@ -12,7 +12,7 @@ async function setUser(tgId) {
                 message_get: 0,
                 message_count: 0,
                 linkClicksCount: 0,
-                blockedUsers: [], // Инициализируем новое поле
+                blockedUsers: [],
                 lastInteraction: new Date()
             });
             await user.save();
@@ -109,12 +109,11 @@ async function updateUserCode(tgId) {
     }
 }
 
-// НОВАЯ ФУНКЦИЯ: Заблокировать пользователя
 async function blockUser(blockerTgId, blockedTgId) {
     try {
         await User.updateOne(
             { tg_id: blockerTgId },
-            { $addToSet: { blockedUsers: blockedTgId }, $set: { lastInteraction: new Date() } } // $addToSet предотвращает дубликаты
+            { $addToSet: { blockedUsers: blockedTgId }, $set: { lastInteraction: new Date() } }
         );
         console.log(`[DB] Пользователь ${blockerTgId} заблокировал ${blockedTgId}.`);
     } catch (error) {
@@ -123,7 +122,6 @@ async function blockUser(blockerTgId, blockedTgId) {
     }
 }
 
-// НОВАЯ ФУНКЦИЯ: Разблокировать пользователя (на случай, если понадобится)
 async function unblockUser(blockerTgId, unblockedTgId) {
     try {
         await User.updateOne(
@@ -137,16 +135,47 @@ async function unblockUser(blockerTgId, unblockedTgId) {
     }
 }
 
-// НОВАЯ ФУНКЦИЯ: Проверить, заблокирован ли пользователь
 async function isUserBlocked(blockerTgId, potentialBlockedTgId) {
     try {
         const user = await User.findOne({ tg_id: blockerTgId });
         if (!user) {
-            return false; // Если блокирующего пользователя нет, то и блокировки нет
+            return false;
         }
         return user.blockedUsers.includes(potentialBlockedTgId);
     } catch (error) {
         console.error(`[DB] Ошибка в isUserBlocked для ${blockerTgId} проверяющего ${potentialBlockedTgId}:`, error.message);
+        throw error;
+    }
+}
+
+// НОВАЯ ФУНКЦИЯ: Сохранение контекста анонимного сообщения
+async function saveAnonMessageContext(botMessageId, recipientChatId, originalSenderId, originalSenderMessageId) {
+    try {
+        const context = new AnonMessageContext({
+            bot_message_id: botMessageId,
+            recipient_chat_id: recipientChatId,
+            original_sender_id: originalSenderId,
+            original_sender_message_id: originalSenderMessageId,
+            created_at: new Date()
+        });
+        await context.save();
+        console.log(`[DB] Сохранен контекст анонимного сообщения: bot_message_id=${botMessageId}, original_sender_id=${originalSenderId}`);
+    } catch (error) {
+        console.error(`[DB] Ошибка в saveAnonMessageContext:`, error.message);
+        throw error;
+    }
+}
+
+// НОВАЯ ФУНКЦИЯ: Получение контекста анонимного сообщения
+async function getAnonMessageContext(botMessageId, recipientChatId) {
+    try {
+        const context = await AnonMessageContext.findOne({
+            bot_message_id: botMessageId,
+            recipient_chat_id: recipientChatId
+        });
+        return context ? context.toObject() : null;
+    } catch (error) {
+        console.error(`[DB] Ошибка в getAnonMessageContext для bot_message_id=${botMessageId}, recipient_chat_id=${recipientChatId}:`, error.message);
         throw error;
     }
 }
@@ -160,7 +189,9 @@ export {
     addMessageCounts,
     addLinkClick,
     updateUserCode,
-    blockUser, // Экспортируем новые функции
+    blockUser,
     unblockUser,
-    isUserBlocked
+    isUserBlocked,
+    saveAnonMessageContext, // Экспортируем новые функции
+    getAnonMessageContext
 };
