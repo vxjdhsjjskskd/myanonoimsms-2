@@ -41,7 +41,7 @@ sendScene.on('text', async (ctx) => {
         await addMessageCounts(senderId, userIdToSend);
 
         // Отправляем сообщение получателю
-        const sentMessageToRecipient = await ctx.telegram.sendMessage(userIdToSend, `✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
+        const sentMessageToRecipient = await ctx.telegram.sendMessage(userIdToSend, `↩️ Свайпни для ответа.\n\n✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
             parse_mode: "Markdown",
             reply_markup: anonymousMessageButtons(senderId, userIdToSend).reply_markup // Кнопка Заблокировать
         });
@@ -65,7 +65,7 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     const userIdToSend = ctx.scene.state.user;
     const senderId = ctx.from.id;
     const message = ctx.message;
-    const baseText = "✉️ *Пришло новое сообщение!*\n\n";
+    const baseText = "↩️ Свайпни для ответа.\n\n✉️ *Пришло новое сообщение!*\n\n"; // Добавлена подсказка
     const caption = message.caption ? baseText + message.caption : baseText;
     const replyMarkup = anonymousMessageButtons(senderId, userIdToSend).reply_markup;
     const originalSenderMessageId = ctx.message.message_id;
@@ -171,7 +171,7 @@ bot.use(async (ctx, next) => {
     cooldowns.set(userId, now);
     return next();
 });
-// --- Обработчики команд ---
+                // --- Обработчики команд ---
 
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
@@ -308,17 +308,18 @@ bot.on('message', async (ctx) => {
     // Проверяем, является ли сообщение ответом на сообщение бота
     if (ctx.message.reply_to_message && ctx.message.reply_to_message.from.id === bot.botInfo.id) {
         const repliedToBotMessageId = ctx.message.reply_to_message.message_id;
-        const currentChatId = ctx.chat.id;
+        const currentChatId = ctx.chat.id; // Это ID пользователя, который сейчас отвечает
 
-        // Пытаемся получить контекст анонимного сообщения
+        // Пытаемся получить контекст анонимного сообщения, на которое ответили
         const anonContext = await getAnonMessageContext(repliedToBotMessageId, currentChatId);
 
         if (anonContext) {
-            const originalSenderId = anonContext.original_sender_id;
-            const originalSenderMessageId = anonContext.original_sender_message_id; // Используем ID оригинального сообщения отправителя
-            const replierId = ctx.from.id; // Тот, кто отвечает (текущий пользователь)
+            const originalSenderId = anonContext.original_sender_id; // Кто отправил первое сообщение в этой цепочке
+            const originalSenderMessageId = anonContext.original_sender_message_id; // ID сообщения, которое оригинальный отправитель написал боту
+
+            const replierId = ctx.from.id; // Тот, кто сейчас отвечает (текущий пользователь)
             const message = ctx.message;
-            const baseText = "✉️ *Пришло анонимное ответное сообщение!*\n\n";
+            const baseText = "↩️ Свайпни для ответа.\n\n✉️ *Пришло анонимное ответное сообщение!*\n\n"; // Добавлена подсказка
             const caption = message.caption ? baseText + message.caption : baseText;
             const replyMarkup = anonymousMessageButtons(replierId, originalSenderId).reply_markup; // Кнопка Заблокировать
 
@@ -333,42 +334,43 @@ bot.on('message', async (ctx) => {
                 await addMessageCounts(replierId, originalSenderId);
 
                 // Пересоздаем сообщение для анонимности
+                let sentMessageToOriginalSender;
                 if (message.text) {
-                    await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, {
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
                         reply_to_message_id: originalSenderMessageId // Имитация ответа на первое сообщение отправителя
                     });
                 } else if (message.photo) {
-                    await ctx.telegram.sendPhoto(originalSenderId, message.photo[message.photo.length - 1].file_id, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendPhoto(originalSenderId, message.photo[message.photo.length - 1].file_id, {
                         caption: caption,
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
                         reply_to_message_id: originalSenderMessageId
                     });
                 } else if (message.video) {
-                    await ctx.telegram.sendVideo(originalSenderId, message.video.file_id, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendVideo(originalSenderId, message.video.file_id, {
                         caption: caption,
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
                         reply_to_message_id: originalSenderMessageId
                     });
                 } else if (message.document) {
-                    await ctx.telegram.sendDocument(originalSenderId, message.document.file_id, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendDocument(originalSenderId, message.document.file_id, {
                         caption: caption,
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
                         reply_to_message_id: originalSenderMessageId
                     });
                 } else if (message.audio) {
-                    await ctx.telegram.sendAudio(originalSenderId, message.audio.file_id, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendAudio(originalSenderId, message.audio.file_id, {
                         caption: caption,
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
                         reply_to_message_id: originalSenderMessageId
                     });
                 } else if (message.voice) {
-                    await ctx.telegram.sendVoice(originalSenderId, message.voice.file_id, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendVoice(originalSenderId, message.voice.file_id, {
                         caption: caption,
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
@@ -378,17 +380,17 @@ bot.on('message', async (ctx) => {
                     if (caption && caption !== baseText) {
                         await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: originalSenderMessageId });
                     }
-                    await ctx.telegram.sendVideoNote(originalSenderId, message.video_note.file_id);
+                    sentMessageToOriginalSender = await ctx.telegram.sendVideoNote(originalSenderId, message.video_note.file_id);
                 } else if (message.sticker) {
                     if (caption && caption !== baseText) {
                         await ctx.telegram.sendMessage(originalSenderId, caption, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: originalSenderMessageId });
                     }
-                    await ctx.telegram.sendSticker(originalSenderId, message.sticker.file_id);
+                    sentMessageToOriginalSender = await ctx.telegram.sendSticker(originalSenderId, message.sticker.file_id);
                 } else if (message.poll) {
                     const question = message.poll.question;
                     const options = message.poll.options.map(o => o.text);
                     await ctx.telegram.sendMessage(originalSenderId, baseText, { parse_mode: "Markdown", reply_markup: replyMarkup, reply_to_message_id: originalSenderMessageId });
-                    await ctx.telegram.sendPoll(originalSenderId, question, options, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendPoll(originalSenderId, question, options, {
                         is_anonymous: message.poll.is_anonymous,
                         type: message.poll.type,
                         allows_multiple_answers: message.poll.allows_multiple_answers
@@ -397,6 +399,14 @@ bot.on('message', async (ctx) => {
                     await ctx.reply("⚠️ Бот пока не поддерживает этот тип сообщения для анонимного ответа. Пожалуйста, попробуйте другой тип.", { reply_to_message_id: ctx.message.message_id });
                     return;
                 }
+
+                // СОХРАНЯЕМ КОНТЕКСТ ДЛЯ ЭТОГО ОТВЕТНОГО СООБЩЕНИЯ, чтобы оригинальный отправитель мог ответить на него
+                // bot_message_id: ID сообщения, которое бот только что отправил оригинальному отправителю
+                // recipient_chat_id: ID оригинального отправителя (теперь он получатель этого ответа)
+                // original_sender_id: ID того, кто сейчас отвечал (replierId)
+                // original_sender_message_id: ID сообщения, которое replierId написал боту (контент текущего ответа)
+                await saveAnonMessageContext(sentMessageToOriginalSender.message_id, originalSenderId, replierId, message.message_id);
+
 
                 await ctx.reply('✅ Ваше ответное сообщение отправлено анонимно!', { reply_to_message_id: ctx.message.message_id, parse_mode: 'Markdown' });
                 return; // Важно, чтобы сообщение было обработано здесь и не попало в общий обработчик
@@ -476,4 +486,4 @@ process.once('SIGTERM', async () => {
     console.log('Получен сигнал SIGTERM. Остановка бота...');
     await bot.stop('SIGTERM');
 });
-                                        
+        
