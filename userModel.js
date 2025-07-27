@@ -24,7 +24,7 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    blockedUsers: { // НОВОЕ ПОЛЕ: Массив ID пользователей, которых заблокировал этот пользователь
+    blockedUsers: {
         type: [Number],
         default: []
     },
@@ -43,7 +43,7 @@ const anonMessageContextSchema = new mongoose.Schema({
     bot_message_id: {
         type: Number,
         required: true,
-        unique: true // Каждое сообщение бота уникально
+        unique: true
     },
     // ID чата, в который бот отправил это сообщение (ID получателя)
     recipient_chat_id: {
@@ -63,7 +63,7 @@ const anonMessageContextSchema = new mongoose.Schema({
     created_at: {
         type: Date,
         default: Date.now,
-        expires: '5d' // Автоматическое удаление документов через 5 дней
+        expires: '90d' // ИЗМЕНЕНО: Автоматическое удаление документов через 90 дней (приблизительно 3 месяца)
     }
 }, {
     collection: 'anon_message_contexts' // Отдельная коллекция
