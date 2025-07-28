@@ -17,10 +17,12 @@ export const bot = new Telegraf(BOT_TOKEN);
 const sendScene = new Scenes.BaseScene('sendScene');
 
 sendScene.enter(async (ctx) => {
+    // Безопасный доступ к message_id
+    const replyToMessageId = ctx.message ? ctx.message.message_id : undefined;
     await ctx.reply(
         "👉 Введите сообщение, которое хотите отправить.\n\n" +
         "🤖 Бот поддерживает следующие типы сообщений: `Текст, фото, видео, голосовые сообщения, видеосообщения, стикеры, документы, опросы, GIF.`",
-        { reply_markup: cancelKeyboard().reply_markup, parse_mode: "Markdown", reply_to_message_id: ctx.message ? ctx.message.message_id : undefined }
+        { reply_markup: cancelKeyboard().reply_markup, parse_mode: "Markdown", reply_to_message_id: replyToMessageId }
     );
 });
 
@@ -131,7 +133,8 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
 
 sendScene.action('cancel', async (ctx) => {
     await ctx.answerCbQuery("Действие отменено!");
-    if (ctx.callbackQuery.message) {
+    // Безопасная проверка
+    if (ctx.callbackQuery && ctx.callbackQuery.message) {
         await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
     }
     await ctx.scene.leave();
@@ -145,33 +148,7 @@ const stage = new Scenes.Stage([sendScene]); // ОБНОВЛЕНО: Только
 
 bot.use(session());
 bot.use(stage.middleware());
-
-
-// --- Антифлуд Middleware ---
-const cooldowns = new Map();
-const COOLDOWN_SECONDS = 3; 
-
-bot.use(async (ctx, next) => {
-    const userId = ctx.from.id;
-    const now = Date.now();
-
-    if (ctx.chat && ctx.chat.id) {
-        await setUser(ctx.chat.id);
-    }
-
-    const lastExecuted = cooldowns.get(userId);
-    if (lastExecuted) {
-        const timeElapsed = now - lastExecuted;
-        const timeLeft = (COOLDOWN_SECONDS * 1000) - timeElapsed;
-        if (timeLeft > 0) {
-            const secondsLeft = Math.ceil(timeLeft / 1000);
-            return ctx.reply(`Пожалуйста, подождите ${secondsLeft} секунд перед отправкой следующего запроса.`, { reply_to_message_id: ctx.message.message_id });
-        }
-    }
-    cooldowns.set(userId, now);
-    return next();
-});
-                // --- Обработчики команд ---
+        // --- Обработчики команд ---
 
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
@@ -260,10 +237,13 @@ bot.action('generate_new_link', async (ctx) => {
     const botInfo = await ctx.telegram.getMe();
     const newLink = `https://t.me/${botInfo.username}?start=${newCode}`;
 
+    // Безопасная проверка для reply_to_message_id
+    const replyToMessageId = (ctx.callbackQuery && ctx.callbackQuery.message) ? ctx.callbackQuery.message.message_id : undefined;
+
     await ctx.editMessageText(
         `✅ *Ваша новая ссылка успешно сгенерирована:*\n👉 \`${newLink}\`\n\n` +
         `Ваша старая ссылка больше недействительна.`,
-        { parse_mode: 'Markdown', reply_to_message_id: ctx.callbackQuery.message.message_id } // reply_to_message_id для edit
+        { parse_mode: 'Markdown', reply_to_message_id: replyToMessageId }
     );
 });
 
@@ -276,7 +256,8 @@ bot.command('help', async (ctx) => {
 bot.action(/^again_(.+)$/, async (ctx) => {
     const userIdToSend = ctx.match[1];
     await ctx.answerCbQuery();
-    if (ctx.callbackQuery.message) {
+    // Безопасная проверка
+    if (ctx.callbackQuery && ctx.callbackQuery.message) {
         await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
     }
     await ctx.scene.enter('sendScene', { user: userIdToSend });
@@ -290,7 +271,9 @@ bot.action(/^block_user_(.+)_from_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery('Блокировка пользователя...');
 
     if (blockerTgId !== ctx.from.id) { // Проверяем, что блокирует тот, кто нажал кнопку
-        return ctx.reply('⚠️ Ошибка: Вы не можете заблокировать пользователя от имени другого аккаунта.', { reply_to_message_id: ctx.callbackQuery.message.message_id });
+        // Безопасная проверка для reply_to_message_id
+        const replyToMessageId = ctx.callbackQuery && ctx.callbackQuery.message ? ctx.callbackQuery.message.message_id : undefined;
+        return ctx.reply('⚠️ Ошибка: Вы не можете заблокировать пользователя от имени другого аккаунта.', { reply_to_message_id: replyToMessageId });
     }
 
     try {
@@ -419,6 +402,12 @@ bot.on('message', async (ctx) => {
                 );
                 return;
             }
+        } else {
+            // Если контекст не найден (сообщение слишком старое или не является анонимным сообщением от бота)
+            // Возвращаем стандартное "Я не понял"
+            const replyToMessageId = ctx.message ? ctx.message.message_id : undefined;
+            await ctx.reply('Я не понял вашу команду. Пожалуйста, используйте команды из меню или следуйте инструкциям для отправки анонимного сообщения.', { reply_to_message_id: replyToMessageId });
+            return;
         }
     }
 
