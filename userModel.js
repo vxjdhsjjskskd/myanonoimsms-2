@@ -63,7 +63,7 @@ const anonMessageContextSchema = new mongoose.Schema({
     created_at: {
         type: Date,
         default: Date.now,
-        expires: '90d' // ИЗМЕНЕНО: Автоматическое удаление документов через 90 дней (приблизительно 3 месяца)
+        expires: '60d' // ИЗМЕНЕНО: Автоматическое удаление документов через 60 дней (приблизительно 2 месяца)
     }
 }, {
     collection: 'anon_message_contexts' // Отдельная коллекция
