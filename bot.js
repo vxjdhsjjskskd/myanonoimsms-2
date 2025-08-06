@@ -11,6 +11,12 @@ dotenv.config();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 export const bot = new Telegraf(BOT_TOKEN);
 
+// Функция для экранирования специальных символов Markdown V2
+// https://core.telegram.org/bots/api#markdownv2-style
+function escapeMarkdownV2(text) {
+    return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+}
+
 // --- FSM (Finite State Machine) - Сцены и состояния ---
 
 // Сцена для отправки ПЕРВОГО анонимного сообщения
@@ -42,8 +48,11 @@ sendScene.on('text', async (ctx) => {
     try {
         await addMessageCounts(senderId, userIdToSend);
 
+        // Экранируем текст сообщения перед отправкой
+        const escapedText = escapeMarkdownV2(ctx.message.text);
+
         // Отправляем сообщение получателю
-        const sentMessageToRecipient = await ctx.telegram.sendMessage(userIdToSend, `↩️ Свайпни для ответа.\n\n✉️ *Пришло новое сообщение!*\n\n${ctx.message.text}`, {
+        const sentMessageToRecipient = await ctx.telegram.sendMessage(userIdToSend, `↩️ Свайпни для ответа.\n\n✉️ *Пришло новое сообщение!*\n\n${escapedText}`, {
             parse_mode: "Markdown",
             reply_markup: anonymousMessageButtons(senderId, userIdToSend).reply_markup // Кнопка Заблокировать
         });
@@ -57,7 +66,7 @@ sendScene.on('text', async (ctx) => {
         console.error(`[Bot] Ошибка отправки текста от ${senderId} к ${userIdToSend}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
-            `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
+            `Попробуйте ещё раз или напишите администратору (@askQsupportbot).`, // ИЗМЕНЕНО: Контакт администратора
             { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
         );
     }
@@ -68,7 +77,11 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
     const senderId = ctx.from.id;
     const message = ctx.message;
     const baseText = "↩️ Свайпни для ответа.\n\n✉️ *Пришло новое сообщение!*\n\n"; // Добавлена подсказка
-    const caption = message.caption ? baseText + message.caption : baseText;
+    
+    // Экранируем caption, если он есть
+    const escapedCaption = message.caption ? escapeMarkdownV2(message.caption) : '';
+    const caption = message.caption ? baseText + escapedCaption : baseText;
+
     const replyMarkup = anonymousMessageButtons(senderId, userIdToSend).reply_markup;
     const originalSenderMessageId = ctx.message.message_id;
 
@@ -125,7 +138,7 @@ sendScene.on(['photo', 'video', 'document', 'audio', 'voice', 'video_note', 'sti
         console.error(`[Bot] Ошибка отправки медиа/опроса от ${senderId} к ${userIdToSend}:`, e.message);
         await ctx.reply(
             `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
-            `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
+            `Попробуйте ещё раз или напишите администратору (@askQsupportbot).`, // ИЗМЕНЕНО: Контакт администратора
             { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown", reply_markup: cancelKeyboard().reply_markup }
         );
     }
@@ -148,7 +161,8 @@ const stage = new Scenes.Stage([sendScene]); // ОБНОВЛЕНО: Только
 
 bot.use(session());
 bot.use(stage.middleware());
-        // --- Обработчики команд ---
+
+// --- Обработчики команд ---
 
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
@@ -303,7 +317,12 @@ bot.on('message', async (ctx) => {
             const replierId = ctx.from.id; // Тот, кто сейчас отвечает (текущий пользователь)
             const message = ctx.message;
             const baseText = "↩️ Свайпни для ответа.\n\n✉️ *Пришло анонимное ответное сообщение!*\n\n"; // Добавлена подсказка
-            const caption = message.caption ? baseText + message.caption : baseText;
+            
+            // Экранируем текст сообщения или caption, если они есть
+            const escapedText = message.text ? escapeMarkdownV2(message.text) : '';
+            const escapedCaption = message.caption ? escapeMarkdownV2(message.caption) : '';
+
+            const caption = message.caption ? baseText + escapedCaption : baseText;
             const replyMarkup = anonymousMessageButtons(replierId, originalSenderId).reply_markup; // Кнопка Заблокировать
 
             // Проверяем, не заблокировал ли оригинальный отправитель отвечающего
@@ -319,7 +338,7 @@ bot.on('message', async (ctx) => {
                 // Пересоздаем сообщение для анонимности
                 let sentMessageToOriginalSender;
                 if (message.text) {
-                    sentMessageToOriginalSender = await ctx.telegram.sendMessage(originalSenderId, baseText + message.text, {
+                    sentMessageToOriginalSender = await ctx.telegram.sendMessage(originalSenderId, baseText + escapedText, { // Используем экранированный текст
                         parse_mode: "Markdown",
                         reply_markup: replyMarkup,
                         reply_to_message_id: originalSenderMessageId // Имитация ответа на первое сообщение отправителя
@@ -396,8 +415,8 @@ bot.on('message', async (ctx) => {
             } catch (e) {
                 console.error(`[Bot] Ошибка отправки ответного сообщения от ${replierId} к ${originalSenderId}:`, e.message);
                 await ctx.reply(
-                    `⚠️❌ Произошла ошибка при отправке ответного сообщения: \`${e.message}\`\n\n` +
-                    `Попробуйте ещё раз или напишите администратору (@ArtizSQ или @RegaaTG).`,
+                    `⚠️❌ Произошла ошибка: \`${e.message}\`\n\n` +
+                    `Попробуйте ещё раз или напишите администратору (@askQsupportbot).`, // ИЗМЕНЕНО: Контакт администратора
                     { reply_to_message_id: ctx.message.message_id, parse_mode: "Markdown" }
                 );
                 return;
@@ -475,4 +494,4 @@ process.once('SIGTERM', async () => {
     console.log('Получен сигнал SIGTERM. Остановка бота...');
     await bot.stop('SIGTERM');
 });
-        
+                                                                                 
